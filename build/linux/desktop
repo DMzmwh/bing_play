@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A bing_play application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/bing_play.exe %u
+Terminal=false
+Type=Application
+Icon=bing_play.exe
+Categories=Utility;
+StartupWMClass=bing_play.exe
+
+ 
