@@ -32,6 +32,13 @@ func (d *ResourceDAO) Create(r *models.Resource) error {
 // Get 根据ID查询
 func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 
+	//## 4、优先级顺序（重要）
+	//1. `.Table("xxx")` → **最高，硬指定表，无视 model**
+	//2. model 的 `TableName()` 方法返回值
+	//3. GORM 默认规则：结构体名转小写复数
+	//> 你原代码：没有 `.Table()`，没有 `.Model()`，直接 `First(&r)`
+	//> GORM 拿传入的 `&r`（*models.Resource），调用它的 TableName ()；没实现就走默认复数规则。
+
 	var r models.Resource
 
 	err := d.db.

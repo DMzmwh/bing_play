@@ -53,7 +53,7 @@ func main() {
 		panic(errLogger)
 	}
 	fmt.Print("----------" + appName)
-	logger.Torrent.Info("application start")
+	logger.App.Info("application start")
 
 	start.NewStartup(configInfo)
 	// Create a new Wails application by providing the necessary options.
