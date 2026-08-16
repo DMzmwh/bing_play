@@ -30,7 +30,10 @@ func (job *TorrentJob) StartDownload() {
 	defer job.cancel()
 
 	//开始下载后
+	job.mu.Lock()
+	//下载逻辑
 	job.Status = StatusDownloading
+	job.mu.Unlock()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
