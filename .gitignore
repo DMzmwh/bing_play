@@ -1,6 +1,9 @@
 .task
+.idea
 bin
+data
 frontend/dist
+frontend/bindings
 frontend/node_modules
 build/linux/appimage/build
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
