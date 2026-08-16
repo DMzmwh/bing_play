@@ -53,20 +53,21 @@ func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 	return &r, err
 }
 
-// func GetPeerStats(
 //
-//	datasouce *gorm.DB,
+//// func GetPeerStats(
+////
+////	datasouce *gorm.DB,
+////
+//// ) ([]PeerStat, error) {
+//func (d *ResourceDAO) GetPeerStats() ([]models.PeerStat, error) {
 //
-// ) ([]PeerStat, error) {
-func (d *ResourceDAO) GetPeerStats() ([]models.PeerStat, error) {
-
-	var result []models.PeerStat
-
-	err := d.db.Raw(`
-		SELECT peer_id,COUNT(*) as count FROM resources
-		GROUP BY peer_id
-		ORDER BY count DESC
-	`).Scan(&result).Error
-
-	return result, err
-}
+//	var result []models.PeerStat
+//
+//	err := d.db.Raw(`
+//		SELECT peer_id,COUNT(*) as count FROM resources
+//		GROUP BY peer_id
+//		ORDER BY count DESC
+//	`).Scan(&result).Error
+//
+//	return result, err
+//}

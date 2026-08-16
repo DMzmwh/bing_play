@@ -42,7 +42,7 @@ func NewStartup(cfg *config.Config) *StartupApp {
 	db := db2.InitDB(cfg)
 	// 初始化数据库 torrent
 	//初始化容器
-	cn := container.NewContainer(db, i18n)
+	cn := container.NewContainer(db, cfg, i18n)
 	//初始化http服务
 	httpServer := server.NewServer(cn)
 	httpServer.Start()
