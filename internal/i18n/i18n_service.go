@@ -1,28 +1,28 @@
 package i18n
 
 import (
-	"embed"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/BurntSushi/toml"
-	"github.com/nicksnyder/go-i18n/v2/i18n"
+	i18nlib "github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
 
-//go:embed *.toml
-var localeFS embed.FS
+const LocaleDir = "./resources/locales"
 
 type I18nService struct {
-	bundle *i18n.Bundle
-	lang   string
-	mu     sync.RWMutex
+	bundle      *i18nlib.Bundle
+	lang        string
+	defaultLang string
+	mu          sync.RWMutex
 }
 
 func NewI18nService(defaultLang string) (*I18nService, error) {
-	bundle := i18n.NewBundle(
-		language.Chinese,
+	bundle := i18nlib.NewBundle(
+		language.English,
 	)
 
 	bundle.RegisterUnmarshalFunc(
@@ -30,79 +30,98 @@ func NewI18nService(defaultLang string) (*I18nService, error) {
 		toml.Unmarshal,
 	)
 
-	// 自动加载当前目录下所有 toml 文件
-	entries, err := localeFS.ReadDir(".")
+	err := loadLocales(
+		bundle,
+		LocaleDir,
+	)
+
 	if err != nil {
-		return nil, fmt.Errorf(
-			"read locale dir: %w",
+		return nil, err
+	}
+
+	return &I18nService{
+		bundle:      bundle,
+		defaultLang: "en",
+		lang:        defaultLang,
+	}, nil
+}
+
+func loadLocales(bundle *i18nlib.Bundle, dir string) error {
+	files, err := os.ReadDir(dir)
+
+	if err != nil {
+		return fmt.Errorf(
+			"read locales: %w",
 			err,
 		)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
+	for _, file := range files {
+		if file.IsDir() {
 			continue
 		}
-
-		name := entry.Name()
-
-		if filepath.Ext(name) != ".toml" {
+		if filepath.Ext(file.Name()) != ".toml" {
 			continue
 		}
-
-		_, err := bundle.LoadMessageFileFS(
-			localeFS,
-			name,
+		_, err := bundle.LoadMessageFile(
+			filepath.Join(
+				dir,
+				file.Name(),
+			),
 		)
-
 		if err != nil {
-			return nil, fmt.Errorf(
-				"load locale %s: %w",
-				name,
-				err,
-			)
+			return err
 		}
 	}
-
-	return &I18nService{
-		bundle: bundle,
-		lang:   defaultLang,
-	}, nil
+	return nil
 }
 
-// SetLang 切换语言
-func (s *I18nService) SetLang(lang string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.lang = lang
-}
-
-// Lang 获取当前语言
-func (s *I18nService) Lang() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return s.lang
-}
-
-// T 获取翻译文本
-func (s *I18nService) T(messageID string, data map[string]interface{}) string {
+func (s *I18nService) T(id string, data map[string]interface{}) string {
 	s.mu.RLock()
 	lang := s.lang
 	s.mu.RUnlock()
-	localizer := i18n.NewLocalizer(
+	localizer := i18nlib.NewLocalizer(
 		s.bundle,
 		lang,
 	)
-	text, err := localizer.Localize(
-		&i18n.LocalizeConfig{
-			MessageID:    messageID,
+	msg, err := localizer.Localize(
+		&i18nlib.LocalizeConfig{
+			MessageID:    id,
 			TemplateData: data,
 		},
 	)
 	if err != nil {
-		return messageID
+		return id
 	}
-	return text
+	return msg
+}
+
+func (s *I18nService) SetLang(lang string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 判断语言是否存在
+	tag, err := language.Parse(lang)
+	if err != nil {
+		s.lang = s.defaultLang
+		return
+	}
+	// bundle 是否加载了该语言
+	if len(s.bundle.LanguageTags()) == 0 {
+		s.lang = s.defaultLang
+		return
+	}
+	found := false
+	for _, t := range s.bundle.LanguageTags() {
+		if t == tag {
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.lang = s.defaultLang
+		return
+	}
+
+	s.lang = lang
 }

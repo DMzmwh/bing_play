@@ -2,6 +2,7 @@ version: '3'
 
 vars:
   APP_NAME: "bing-play"
+  RESOURCE_DIR: resources
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
@@ -19,7 +20,12 @@ includes:
   android: ./build/android/Taskfile.yml
 
 tasks:
+  copy-resources:
+    cmds:
+      - task: "{{.GOOS}}:copy-resources"
   build:
+    deps:
+      - copy-resources
     summary: Builds the application
     cmds:
       - task: "{{.GOOS}}:build"

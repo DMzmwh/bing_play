@@ -15,6 +15,10 @@ vars:
   CROSS_IMAGE: wails-cross
 
 tasks:
+  copy-resources:
+    desc: Copy resources on windows
+    cmds:
+      - powershell -Command "Copy-Item -Recurse '{{.RESOURCE_DIR}}' '{{.BIN_DIR}}' -Force"
   build:
     summary: Builds the application for Windows
     cmds:

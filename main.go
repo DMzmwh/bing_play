@@ -6,6 +6,9 @@ import (
 	"changeme/internal/start"
 	"embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 
 	"log"
 	"time"
@@ -32,6 +35,16 @@ func init() {
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
 func main() {
+	// 全局捕获panic，写入日志文件
+	defer func() {
+		if r := recover(); r != nil {
+			// 日志输出到exe同目录 app.log
+			logPath, _ := filepath.Abs("app.log")
+			_ = os.WriteFile(logPath, debug.Stack(), 0644)
+			// 重新panic，让程序退出
+			panic(r)
+		}
+	}()
 	configInfo := config.Load()
 	appName := configInfo.AppName
 

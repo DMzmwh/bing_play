@@ -8,6 +8,7 @@ import (
 	"changeme/internal/logger"
 	"changeme/internal/server"
 	"context"
+	"log/slog"
 
 	"gorm.io/gorm"
 )
@@ -22,6 +23,10 @@ func NewStartup(cfg *config.Config) *StartupApp {
 		"en",
 	)
 	if err != nil {
+		logger.Error.Error(
+			"i18n init error",
+			slog.Any("error", err),
+		)
 		panic(err)
 	}
 

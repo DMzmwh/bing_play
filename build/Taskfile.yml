@@ -1,6 +1,11 @@
 version: '3'
 
 tasks:
+  copy-resources:
+    desc: Copy resources
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - cp -r {{.RESOURCE_DIR}} {{.BIN_DIR}}/
   go:mod:tidy:
     summary: Runs `go mod tidy`
     internal: true

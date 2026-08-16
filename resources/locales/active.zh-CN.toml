@@ -10,3 +10,6 @@ other = "确定"
 
 [btn_cancel]
 other = "取消"
+
+[btn_cancel_close]
+other = "取消关闭"

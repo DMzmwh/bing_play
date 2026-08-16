@@ -4,6 +4,7 @@ import (
 	"changeme/internal/config"
 	"changeme/internal/logger"
 	"database/sql"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -50,6 +51,7 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	/////////////////////////////////////////////////////
 	err = RunMigrate(sqlDB)
 	if err != nil {
+		logger.Error.Error("发生错误", slog.Any("err", err))
 		panic(err)
 	}
 	/////////////////////////////////////////////////////
@@ -62,6 +64,11 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		&gorm.Config{},
 	)
 	if err != nil {
+		// App 普通业务日志 Info/Debug/Warn
+		//logger.App.Info("程序启动成功", slog.String("version", "1.0.0"))
+		//logger.App.Warn("警告信息", slog.Int("code", 123))
+		// Error 只输出错误级别
+		logger.Error.Error("发生错误", slog.Any("err", err))
 		panic(err)
 	}
 	DB = gdb

@@ -9,7 +9,7 @@ import (
 
 func Load() *Config {
 
-	fmt.Println("启动配置 - using DEV config")
+	fmt.Println("启动配置 - DEV")
 	basePath := "./data"
 	return &Config{
 		AppName: "bing-play-dev",

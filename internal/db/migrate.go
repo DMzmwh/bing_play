@@ -13,7 +13,7 @@ func RunMigrate(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	m, err := migrate.NewWithDatabaseInstance("file://migrations", "sqlite", driver)
+	m, err := migrate.NewWithDatabaseInstance("file://resources/migrations", "sqlite", driver)
 	if err != nil {
 		return err
 	}

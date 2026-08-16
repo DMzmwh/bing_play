@@ -10,3 +10,7 @@ other = "OK"
 
 [btn_cancel]
 other = "Cancel"
+
+
+[btn_cancel_close]
+other = "btn_cancel_close"
