@@ -48,25 +48,19 @@ func (m *TorrentManager) handleFinished(job *TorrentJob) {
 	select {
 	case <-job.ctx.Done():
 		//取消 或者 下载完成等
-		nextJob := m.nextQueuedDownloadJob()
-		if nextJob == nil {
-			m.sem.Release(1)
-			return
-		}
-		nextJob.StartDownload()
+		m.downloadNextJob()
 		return
 	}
 }
 
-func (m *TorrentManager) nextQueuedDownloadJob() *TorrentJob {
+// 下载下一个
+func (m *TorrentManager) downloadNextJob() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, job := range m.jobsMap {
 		if job.Status == StatusQueued {
-			job.Status = StatusDownloading
-			return job
+			job.StartDownload()
+			return
 		}
 	}
-
-	return nil
 }
