@@ -30,9 +30,11 @@ type TorrentJob struct {
 func (job *TorrentJob) StartDownload() {
 	defer job.cancel()
 
+	job.mu.RLock()
 	if job.Status != models.JobStatusQueued {
 		return
 	}
+	job.mu.RUnlock()
 
 	//下载逻辑
 	if job.torrent.Info() != nil {
@@ -133,6 +135,8 @@ func (job *TorrentJob) CancelJob() {
 		job.cancel()
 		job.mu.Unlock()
 	}()
-	job.torrent.Drop()
 	job.Status = models.JobStatus0
+	if job.torrent != nil {
+		job.torrent.Drop()
+	}
 }

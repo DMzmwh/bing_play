@@ -107,68 +107,121 @@ func (m *TorrentManager) Shutdown() error {
 func (m *TorrentManager) PauseJob(hashInfo string) error {
 	m.mu.RLock()
 	job := m.jobsMap[hashInfo]
+	m.mu.RUnlock()
 	if job == nil {
 		return fmt.Errorf("任务不存在: %s", hashInfo)
 	}
-	m.mu.RUnlock()
 	job.Pause()
 	return nil
 }
 
 func (m *TorrentManager) CancelJob(hashInfo string) error {
-	m.mu.Lock()
+	m.mu.RLock()
 	job, ok := m.jobsMap[hashInfo]
-	if !ok {
-		m.mu.Unlock()
+	m.mu.RUnlock()
+	if !ok || job == nil {
 		return fmt.Errorf("任务不存在: %s", hashInfo)
 	}
-	if job == nil {
-		return fmt.Errorf("任务不存在: %s", hashInfo)
-	}
+
+	// 先触发取消
+	job.CancelJob()
+
+	m.mu.Lock()
 	delete(m.jobsMap, hashInfo)
 	m.mu.Unlock()
-	job.CancelJob()
 	return nil
 }
 
+// startJob 外部调用，尝试启动一个排队任务；仅当拿到信号量且状态为Queued才启动
+// 【注意】调用startJob前，job必须已经存入jobsMap
 func (m *TorrentManager) startJob(job *TorrentJob) {
-	if job.Status != models.JobStatusQueued {
-		logger.Torrent.Error("还没有获取到mate信息", slog.Any("InfoHash", job.job.InfoHash))
+	m.mu.RLock()
+	status := job.Status
+	m.mu.RUnlock()
+
+	if status != models.JobStatusQueued {
+		logger.Torrent.Error("任务非排队状态，跳过启动", slog.Any("InfoHash", job.job.InfoHash), slog.String("status", string(status)))
 		return
 	}
+
+	// 获取信号量，拿不到直接返回，等待现有任务结束后downloadNextJob调度
 	if !m.sem.TryAcquire(1) {
 		return
 	}
+	// 单goroutine：下载 + 完成监听，不再开第二个handleFinished协程
+	go func(j *TorrentJob) {
+		// 任务结束无论成功失败取消，必须释放信号量
+		defer func() {
+			m.sem.Release(1)
+			// 任务结束，调度下一个排队任务
+			m.downloadNextJob()
+		}()
 
-	m.mu.Lock()
-	m.jobsMap[job.job.InfoHash] = job
-	m.mu.Unlock()
-
-	go job.StartDownload()
-	go m.handleFinished(job)
+		// 阻塞执行下载
+		j.StartDownload()
+	}(job)
 }
 
-/*
-监听下载执行完成
-*/
-func (m *TorrentManager) handleFinished(job *TorrentJob) {
-	select {
-	case <-job.ctx.Done():
-		//取消 或者 下载完成等
-		m.downloadNextJob()
-		return
-	}
-}
-
-// 下载下一个
+// downloadNextJob 寻找下一个Queued任务，调用startJob尝试启动
+// 只负责找任务，不直接go StartDownload，统一交给startJob做信号量校验
 func (m *TorrentManager) downloadNextJob() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, job := range m.jobsMap {
-		if job.Status == models.JobStatusQueued {
-			go job.StartDownload()
-			return
+	m.mu.RLock()
+	var nextJob *TorrentJob
+	for _, j := range m.jobsMap {
+		if j.Status == models.JobStatusQueued {
+			nextJob = j
+			break
 		}
 	}
-	m.sem.Release(1)
+	m.mu.RUnlock()
+
+	if nextJob == nil {
+		return
+	}
+	// 尝试启动，startJob内部会做TryAcquire信号量，拿不到直接返回
+	m.startJob(nextJob)
 }
+
+//
+//func (m *TorrentManager) startJob(job *TorrentJob) {
+//	if job.Status != models.JobStatusQueued {
+//		logger.Torrent.Error("还没有获取到mate信息", slog.Any("InfoHash", job.job.InfoHash))
+//		return
+//	}
+//	if !m.sem.TryAcquire(1) {
+//		return
+//	}
+//
+//	m.mu.Lock()
+//	m.jobsMap[job.job.InfoHash] = job
+//	m.mu.Unlock()
+//
+//	go job.StartDownload()
+//	go m.handleFinished(job)
+//}
+//
+///*
+//监听下载执行完成
+//*/
+//func (m *TorrentManager) handleFinished(job *TorrentJob) {
+//	select {
+//	case <-job.ctx.Done():
+//		//取消 或者 下载完成等
+//		m.downloadNextJob()
+//		return
+//	}
+//}
+//
+//// 下载下一个
+//func (m *TorrentManager) downloadNextJob() {
+//	m.mu.Lock()
+//	defer m.mu.Unlock()
+//	for _, job := range m.jobsMap {
+//		if job.Status == models.JobStatusQueued {
+//			go job.StartDownload()
+//			go m.handleFinished(job)
+//			return
+//		}
+//	}
+//	m.sem.Release(1)
+//}
