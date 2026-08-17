@@ -137,8 +137,6 @@ func (m *TorrentManager) CancelJob(hashInfo string) error {
 func (m *TorrentManager) startJob(job *TorrentJob) {
 	m.mu.RLock()
 	status := job.Status
-	m.mu.RUnlock()
-
 	if status != models.JobStatusQueued {
 		logger.Torrent.Error("任务非排队状态，跳过启动", slog.Any("InfoHash", job.job.InfoHash), slog.String("status", string(status)))
 		return
@@ -148,6 +146,8 @@ func (m *TorrentManager) startJob(job *TorrentJob) {
 	if !m.sem.TryAcquire(1) {
 		return
 	}
+	m.mu.RUnlock()
+
 	// 单goroutine：下载 + 完成监听，不再开第二个handleFinished协程
 	go func(j *TorrentJob) {
 		// 任务结束无论成功失败取消，必须释放信号量
