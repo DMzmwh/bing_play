@@ -24,9 +24,9 @@ func (d *ResourceDAO) WithTx(tx *gorm.DB) *ResourceDAO {
 	}
 }
 
-// Create 新增资源
-func (d *ResourceDAO) Create(r *models.Resource) error {
-	return d.db.Create(r).Error
+// Save 新增资源
+func (d *ResourceDAO) Save(r *models.Resource) error {
+	return d.db.Save(r).Error
 }
 
 // Get 根据ID查询

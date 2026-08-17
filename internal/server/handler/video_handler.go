@@ -35,8 +35,8 @@ func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("JSON:", string(data))
 		fmt.Println("---------------2")
 
-		list, _ := resourceDao.GetPeerStats()
-		data2, _ := json.Marshal(list)
+		//list, _ := resourceDao.GetPeerStats()
+		//data2, _ := json.Marshal(list)
 		fmt.Println("JSON:", string(data2))
 	}
 	// 本地视频真实路径

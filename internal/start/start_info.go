@@ -10,12 +10,15 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"gorm.io/gorm"
 )
 
 type StartupApp struct {
 	db         *gorm.DB
+	Cn         *container.Container
 	httpServer *server.Server
+	ctx        context.Context
 }
 
 func NewStartup(cfg *config.Config) *StartupApp {
@@ -47,17 +50,28 @@ func NewStartup(cfg *config.Config) *StartupApp {
 	httpServer := server.NewServer(cn)
 	httpServer.Start()
 	return &StartupApp{
+		Cn:         cn,
 		db:         db,
 		httpServer: httpServer,
 	}
 }
 
-func (app *StartupApp) Shutdown(ctx context.Context) {
-	httpErr := app.httpServer.Shutdown(ctx)
+// ServiceStartup is called when the application starts
+func (app *StartupApp) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	logger.App.Info("TorrentService ServiceStartup")
+	app.ctx = ctx
+	return nil
+}
+
+// ServiceShutdown is called when the application shuts down
+func (app *StartupApp) ServiceShutdown() error {
+	logger.App.Info("关闭项目")
+	httpErr := app.httpServer.Shutdown(app.ctx)
 	if httpErr != nil {
 		logger.Error.Error(
 			"http server stop error",
 			"error", httpErr,
 		)
 	}
+	return nil
 }

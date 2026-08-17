@@ -20,7 +20,7 @@ type Resource struct {
 	// =========================================================
 
 	// ResourceName 资源名称，例如电影名称、视频名称。
-	ResourceName string `gorm:"not null"`
+	ResourceName *string `gorm:"column:resource_name"`
 
 	// FileName 文件名称，例如 movie.mkv。
 	FileName *string `gorm:"column:file_name"`
@@ -41,27 +41,21 @@ type Resource struct {
 	// TorrentPath 本地 .torrent 文件路径。
 	TorrentPath *string `gorm:"column:torrent_path"`
 
-	// TorrentName Torrent 元数据中的名称。
-	TorrentName *string `gorm:"column:torrent_name"`
-
 	// TotalSize Torrent 总大小，单位：Byte。
-	TotalSize int64 `gorm:"not null;default:0"`
+	TotalSize *int64 `gorm:"default:0"`
 
 	// =========================================================
 	// 本地文件
 	// =========================================================
 
 	// LocalPath 下载文件在本地的绝对路径。
-	LocalPath *string `gorm:"column:local_path"`
+	LocalPath string `gorm:"column:local_path"`
 
 	// FileSize 本地文件实际大小，单位：Byte。
-	FileSize int64 `gorm:"not null;default:0"`
+	FileSize *int64 `gorm:"default:0"`
 
 	// DownloadedSize 已经下载的数据量，单位：Byte。
-	DownloadedSize int64 `gorm:"not null;default:0"`
-
-	// FileHash 本地文件 Hash，例如 MD5、SHA-256。
-	FileHash *string `gorm:"column:file_hash"`
+	DownloadedSize *int64 `gorm:"default:0"`
 
 	// MimeType 文件 MIME 类型，例如 video/mp4、video/x-matroska。
 	MimeType *string `gorm:"column:mime_type"`
@@ -77,7 +71,7 @@ type Resource struct {
 	// missing：数据库记录存在，但本地文件不存在
 	// corrupted：本地文件存在，但文件损坏
 	// deleted：用户主动删除了本地文件
-	LocalStatus LocalStatus `gorm:"column:local_status;type:text;not null"`
+	LocalStatus LocalStatus `gorm:"column:local_status;type:text"`
 
 	// =========================================================
 	// 下载状态
@@ -92,7 +86,7 @@ type Resource struct {
 	// completed：下载完成
 	// failed：下载失败
 	// cancelled：已取消
-	DownloadStatus JobStatus `gorm:"column:download_status;type:text;not null"`
+	DownloadStatus JobStatus `gorm:"column:download_status;type:text"`
 
 	// =========================================================
 	// 下载控制
@@ -100,10 +94,13 @@ type Resource struct {
 
 	// Priority 下载优先级。
 	// 数值越大，优先级越高。
-	Priority int `gorm:"not null;default:0"`
+	Priority *int `gorm:"default:0"`
 
 	// RetryCount 当前任务已经自动重试的次数。
-	RetryCount int `gorm:"not null;default:0"`
+	RetryCount *int `gorm:"default:0"`
+
+	// MateRetryCount 最大自动重试次数。
+	MateRetryCount *int `gorm:"default:0"`
 
 	// ErrorMessage 最近一次下载失败的错误信息。
 	ErrorMessage *string `gorm:"column:error_message"`
@@ -113,19 +110,19 @@ type Resource struct {
 	// =========================================================
 
 	// TotalDuration 媒体总时长，单位：秒。
-	TotalDuration int64 `gorm:"not null;default:0"`
+	TotalDuration *int64 `gorm:"default:0"`
 
 	// Played 是否曾经播放过。
 	//
 	// false：未播放
 	// true：已播放
-	Played bool `gorm:"not null;default:0"`
+	Played *bool `gorm:"default:0"`
 
 	// PlayProgress 当前播放进度，单位：秒。
-	PlayProgress int64 `gorm:"not null;default:0"`
+	PlayProgress *int64 `gorm:"default:0"`
 
 	// PlayCount 播放次数。
-	PlayCount int `gorm:"not null;default:0"`
+	PlayCount *int `gorm:"default:0"`
 
 	// LastPlayTime 最后一次播放时间。
 	LastPlayTime *time.Time `gorm:"column:last_play_time"`
@@ -134,7 +131,7 @@ type Resource struct {
 	//
 	// false：未播放完成
 	// true：已经播放完成
-	Finished bool `gorm:"not null;default:0"`
+	Finished *bool `gorm:"default:0"`
 
 	// =========================================================
 	// 收藏 / 标签
@@ -144,7 +141,7 @@ type Resource struct {
 	//
 	// false：未收藏
 	// true：已收藏
-	Favorite bool `gorm:"not null;default:0"`
+	Favorite *bool `gorm:"default:0"`
 
 	// Tags 资源标签。
 	// 可以保存 JSON，例如 ["电影", "动作"]。
@@ -158,10 +155,10 @@ type Resource struct {
 	// =========================================================
 
 	// CreateTime 资源创建时间。
-	CreateTime time.Time `gorm:"column:create_time"`
+	CreateTime *time.Time `gorm:"column:create_time;default:CURRENT_TIMESTAMP"`
 
 	// UpdateTime 资源最后更新时间。
-	UpdateTime time.Time `gorm:"column:update_time"`
+	UpdateTime *time.Time `gorm:"column:update_time;default:CURRENT_TIMESTAMP"`
 
 	// CompletedTime 下载完成时间。
 	// 未完成时为 nil。

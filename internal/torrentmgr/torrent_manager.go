@@ -5,13 +5,19 @@ import (
 	"changeme/internal/db/models"
 	"changeme/internal/logger"
 	"changeme/internal/utils/ip"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -19,6 +25,7 @@ import (
 type TorrentManager struct {
 	//读写分离锁 读写分离锁，读读不互斥
 	mu      sync.RWMutex
+	Cn      *container.Container
 	jobsMap map[string]*TorrentJob
 	client  *torrent.Client
 	sem     *semaphore.Weighted
@@ -92,6 +99,7 @@ func NewManager(cn *container.Container) (*TorrentManager, error) {
 	manager := &TorrentManager{
 		jobsMap: make(map[string]*TorrentJob),
 		client:  client,
+		Cn:      cn,
 		sem:     semaphore.NewWeighted(5),
 	}
 	return manager, nil
@@ -159,6 +167,12 @@ func (m *TorrentManager) startJob(job *TorrentJob) {
 
 		// 阻塞执行下载
 		j.StartDownload()
+		resource := j.job
+		err := m.Cn.ResourceDao.Save(resource)
+		if err != nil {
+			logger.Torrent.Error("更新数据异常", slog.Any("err", err))
+			return
+		}
 	}(job)
 }
 
@@ -182,46 +196,121 @@ func (m *TorrentManager) downloadNextJob() {
 	m.startJob(nextJob)
 }
 
-//
-//func (m *TorrentManager) startJob(job *TorrentJob) {
-//	if job.Status != models.JobStatusQueued {
-//		logger.Torrent.Error("还没有获取到mate信息", slog.Any("InfoHash", job.job.InfoHash))
-//		return
-//	}
-//	if !m.sem.TryAcquire(1) {
-//		return
-//	}
-//
-//	m.mu.Lock()
-//	m.jobsMap[job.job.InfoHash] = job
-//	m.mu.Unlock()
-//
-//	go job.StartDownload()
-//	go m.handleFinished(job)
-//}
-//
-///*
-//监听下载执行完成
-//*/
-//func (m *TorrentManager) handleFinished(job *TorrentJob) {
-//	select {
-//	case <-job.ctx.Done():
-//		//取消 或者 下载完成等
-//		m.downloadNextJob()
-//		return
-//	}
-//}
-//
-//// 下载下一个
-//func (m *TorrentManager) downloadNextJob() {
-//	m.mu.Lock()
-//	defer m.mu.Unlock()
-//	for _, job := range m.jobsMap {
-//		if job.Status == models.JobStatusQueued {
-//			go job.StartDownload()
-//			go m.handleFinished(job)
-//			return
-//		}
-//	}
-//	m.sem.Release(1)
-//}
+func (m *TorrentManager) AddMagnet(magnet string) error {
+	spec, err := torrent.TorrentSpecFromMagnetUri(magnet)
+	if err != nil {
+		return err
+	}
+
+	return m.newTorrent(spec, &magnet, nil)
+}
+
+func (m *TorrentManager) AddTorrent(filePath string) error {
+	mi, err := metainfo.LoadFromFile(filePath)
+	if err != nil {
+		return err
+	}
+	spec := torrent.TorrentSpecFromMetaInfo(mi)
+	return m.newTorrent(spec, nil, &filePath)
+}
+
+func (m *TorrentManager) newTorrent(spec *torrent.TorrentSpec, magnet *string, filePath *string) error {
+	infoHash := spec.InfoHash.AsString()
+	now := time.Now()
+
+	jobResource := &models.Resource{
+		InfoHash:       infoHash,
+		SourceURL:      magnet,
+		TorrentPath:    filePath,
+		LocalStatus:    models.LocalStatusNotDownloaded,
+		DownloadStatus: models.JobStatus0,
+		LocalPath:      m.Cn.Cfg.DownloadDir,
+		CreateTime:     &now,
+		UpdateTime:     &now,
+	}
+	err := m.Cn.ResourceDao.Save(jobResource)
+	if err != nil {
+		panic(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &TorrentJob{
+		torrent:       nil, // 后续加入torrent客户端后赋值
+		job:           jobResource,
+		retries:       0,
+		priorityIndex: -1, // -1代表不指定特定文件，全部下载；>=0才指定文件索引
+		lastBytes:     0,
+		lastUpload:    0,
+		lastSpeedAt:   time.Now(), // 测速初始时间戳设为当前
+		downloadSpeed: 0,
+		uploadSpeed:   0,
+		Status:        jobResource.DownloadStatus, // 从数据库读取任务状态
+		ctx:           ctx,
+		cancel:        cancel,
+		// mu:  sync.RWMutex零值，无需赋值
+	}
+	m.jobsMap[infoHash] = job
+	baseDir := m.Cn.Cfg.DownloadDir
+	pc, err := storage.NewDefaultPieceCompletionForDir(baseDir)
+	if err != nil {
+		panic(err)
+	}
+	spec.Storage = storage.NewFileWithCompletion(baseDir, pc)
+	tt, _, err := m.client.AddTorrentSpec(spec)
+	if err != nil {
+		return err
+	}
+	go func() {
+		select {
+		case <-job.ctx.Done():
+			return
+		case <-tt.GotInfo():
+			// ✅拿到元信息，填充数据库模型
+			mi := tt.Info()
+			job.mu.Lock()
+			{
+				// 种子名称
+				job.job.ResourceName = &mi.Name
+				// 总大小
+				total := mi.TotalLength()
+				job.job.TotalSize = &total
+				// 切换任务状态：获取元信息完成，进入排队/下载
+				queuedStatus := models.JobStatusQueued
+				job.Status = queuedStatus
+				now := time.Now()
+				job.job.UpdateTime = &now
+				// ResourceName
+				if job.job.ResourceName == nil {
+					name := mi.Name
+					job.job.ResourceName = &name
+					job.job.UpdateTime = &now
+				}
+				// FileName
+				if job.job.FileName == nil {
+					for _, file := range tt.Files() {
+						path := file.DisplayPath()
+						ext := strings.ToLower(filepath.Ext(path))
+
+						switch ext {
+						case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv":
+							fileName := filepath.Base(path)
+							job.job.FileName = &fileName
+							job.job.UpdateTime = &now
+							break
+						}
+					}
+				}
+
+			}
+			job.mu.Unlock()
+
+			// 落库保存元信息
+			_ = m.Cn.ResourceDao.Save(job.job)
+			m.startJob(job)
+			return
+		case <-time.After(60 * 10 * time.Second):
+			tt.Drop()
+			return
+		}
+	}()
+	return nil
+}

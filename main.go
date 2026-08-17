@@ -3,7 +3,9 @@ package main
 import (
 	"changeme/internal/config"
 	"changeme/internal/logger"
+	"changeme/internal/service"
 	"changeme/internal/start"
+	"changeme/internal/torrentmgr"
 	"embed"
 	"fmt"
 	"os"
@@ -55,7 +57,15 @@ func main() {
 	fmt.Print("----------" + appName)
 	logger.App.Info("application start")
 
-	start.NewStartup(configInfo)
+	startUp := start.NewStartup(configInfo)
+
+	manager, errLogger := torrentmgr.NewManager(startUp.Cn)
+	if errLogger != nil {
+		panic(errLogger)
+	}
+	// 初始化 Service
+	torrentService := service.NewTorrentService(manager)
+
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
@@ -65,7 +75,7 @@ func main() {
 		Name:        appName,
 		Description: "A demo of using raw HTML & CSS",
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
+			application.NewService(&GreetService{}), application.NewService(torrentService),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

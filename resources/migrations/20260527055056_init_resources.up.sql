@@ -11,7 +11,7 @@ CREATE TABLE resources (
     -- 资源信息
     -- =========================================================
 
-                           resource_name       TEXT NOT NULL,
+                           resource_name       TEXT,
     -- 资源名称，例如电影名称、视频名称
 
                            file_name           TEXT,
@@ -34,10 +34,7 @@ CREATE TABLE resources (
                            torrent_path        TEXT,
     -- 本地 .torrent 文件路径
 
-                           torrent_name        TEXT,
-    -- Torrent 元数据中的名称
-
-                           total_size          INTEGER NOT NULL DEFAULT 0,
+                           total_size          INTEGER DEFAULT 0,
     -- Torrent 总大小，单位：Byte
 
 
@@ -48,14 +45,11 @@ CREATE TABLE resources (
                            local_path          TEXT,
     -- 下载文件在本地的绝对路径
 
-                           file_size           INTEGER NOT NULL DEFAULT 0,
+                           file_size           INTEGER DEFAULT 0,
     -- 本地文件实际大小，单位：Byte
 
-                           downloaded_size     INTEGER NOT NULL DEFAULT 0,
+                           downloaded_size     INTEGER DEFAULT 0,
     -- 已经下载的数据量，单位：Byte
-
-                           file_hash           TEXT,
-    -- 本地文件 Hash，例如 MD5、SHA-256
 
                            mime_type           TEXT,
     -- 文件 MIME 类型，例如 video/mp4、video/x-matroska
@@ -65,7 +59,7 @@ CREATE TABLE resources (
     -- 本地文件状态
     -- =========================================================
 
-                           local_status        TEXT NOT NULL DEFAULT 'not_downloaded',
+                           local_status        TEXT DEFAULT 'not_downloaded',
     -- 本地文件状态
     --
     -- not_downloaded : 尚未下载
@@ -79,7 +73,7 @@ CREATE TABLE resources (
     -- 下载状态
     -- =========================================================
 
-                           download_status     TEXT NOT NULL DEFAULT 'queued',
+                           download_status     TEXT DEFAULT 'queued',
     -- 下载任务状态
     --
     -- fetching_meta_info : 正在获取 Torrent 元信息
@@ -95,13 +89,13 @@ CREATE TABLE resources (
     -- 下载控制
     -- =========================================================
 
-                           priority            INTEGER NOT NULL DEFAULT 0,
+                           priority            INTEGER DEFAULT 0,
     -- 下载优先级，数值越大优先级越高
 
-                           retry_count         INTEGER NOT NULL DEFAULT 0,
+                           retry_count         INTEGER DEFAULT 0,
     -- 当前任务已经自动重试的次数
 
-                           max_retry_count     INTEGER NOT NULL DEFAULT 3,
+                           mate_retry_count     INTEGER DEFAULT 3,
     -- 最大自动重试次数
 
                            error_message       TEXT,
@@ -112,24 +106,24 @@ CREATE TABLE resources (
     -- 播放信息
     -- =========================================================
 
-                           total_duration      INTEGER NOT NULL DEFAULT 0,
+                           total_duration      INTEGER DEFAULT 0,
     -- 媒体总时长，单位：秒
 
-                           played              INTEGER NOT NULL DEFAULT 0,
+                           played              INTEGER DEFAULT 0,
     -- 是否曾经播放过
     -- 0：未播放
     -- 1：已播放
 
-                           play_progress       INTEGER NOT NULL DEFAULT 0,
+                           play_progress       INTEGER DEFAULT 0,
     -- 当前播放进度，单位：秒
 
-                           play_count          INTEGER NOT NULL DEFAULT 0,
+                           play_count          INTEGER DEFAULT 0,
     -- 播放次数
 
                            last_play_time      DATETIME,
     -- 最后一次播放时间
 
-                           finished            INTEGER NOT NULL DEFAULT 0,
+                           finished            INTEGER DEFAULT 0,
     -- 是否已经播放完成
     -- 0：未完成
     -- 1：已完成
@@ -139,7 +133,7 @@ CREATE TABLE resources (
     -- 收藏 / 标签
     -- =========================================================
 
-                           favorite            INTEGER NOT NULL DEFAULT 0,
+                           favorite            INTEGER DEFAULT 0,
     -- 是否收藏
     -- 0：未收藏
     -- 1：已收藏
@@ -155,10 +149,10 @@ CREATE TABLE resources (
     -- 时间
     -- =========================================================
 
-                           create_time         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                           create_time         DATETIME DEFAULT CURRENT_TIMESTAMP,
     -- 资源创建时间
 
-                           update_time         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                           update_time         DATETIME DEFAULT CURRENT_TIMESTAMP,
     -- 资源最后更新时间
 
                            completed_time      DATETIME
@@ -167,7 +161,7 @@ CREATE TABLE resources (
 
 
 -- =============================================================
--- 索引
+-- 索引（完全原样复制，无改动）
 -- =============================================================
 
 -- =============================================================
