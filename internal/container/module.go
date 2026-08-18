@@ -1,16 +1,13 @@
-package db
+package container
 
 import (
-	"changeme/internal/db/dao"
-
 	"go.uber.org/fx"
 )
 
 var Module = fx.Module(
-	"db",
+	"container",
 
 	fx.Provide(
-		InitDB,
-		dao.NewResourceDAO,
+		NewContainer,
 	),
 )

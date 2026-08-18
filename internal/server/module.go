@@ -1,13 +1,16 @@
-package logger
+package server
 
 import (
+	"changeme/internal/server/handler"
+
 	"go.uber.org/fx"
 )
 
 var Module = fx.Module(
-	"logger",
+	"server",
 
 	fx.Provide(
-		NewI18nService,
+		NewServer,
+		handler.NewVideoHandler,
 	),
 )

@@ -20,7 +20,8 @@ type I18nService struct {
 	mu          sync.RWMutex
 }
 
-func NewI18nService(defaultLang string) (*I18nService, error) {
+func NewI18nService() (*I18nService, error) {
+	defaultLang := "en"
 	bundle := i18nlib.NewBundle(
 		language.English,
 	)
@@ -41,7 +42,7 @@ func NewI18nService(defaultLang string) (*I18nService, error) {
 
 	return &I18nService{
 		bundle:      bundle,
-		defaultLang: "en",
+		defaultLang: defaultLang,
 		lang:        defaultLang,
 	}, nil
 }

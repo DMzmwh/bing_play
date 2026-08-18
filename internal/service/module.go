@@ -1,16 +1,14 @@
-package server
+package service
 
 import (
-	"changeme/internal/server/handler"
-
 	"go.uber.org/fx"
 )
 
 var Module = fx.Module(
-	"server",
+	"service",
 
 	fx.Provide(
-		NewServer,
-		handler.NewVideoHandler,
+		NewTorrentService,
+		NewGreetService,
 	),
 )

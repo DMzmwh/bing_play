@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {ref, onMounted, useTemplateRef} from 'vue'
 import {Events, WML} from "@wailsio/runtime";
-import {GreetService} from "../../bindings/changeme";
+import {GreetService} from "../../bindings/changeme/internal/service";
 
 // Show the actual Wails version this project was generated against.
 const wailsVersion = "v3.0.0-beta.8";

@@ -1,13 +1,13 @@
-package service
+package torrentmgr
 
 import (
 	"go.uber.org/fx"
 )
 
 var Module = fx.Module(
-	"service",
+	"torrentmgr",
 
 	fx.Provide(
-		NewTorrentService,
+		NewManager,
 	),
 )

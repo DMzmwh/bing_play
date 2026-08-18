@@ -1,4 +1,4 @@
-package wailsapp
+package app
 
 import (
 	"changeme/internal/config"
