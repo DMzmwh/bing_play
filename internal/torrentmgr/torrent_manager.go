@@ -1,8 +1,10 @@
 package torrentmgr
 
 import (
-	"changeme/internal/container"
+	"changeme/internal/config"
+	"changeme/internal/db/dao"
 	"changeme/internal/db/models"
+	"changeme/internal/i18n"
 	"changeme/internal/logger"
 	"changeme/internal/utils/ip"
 	"context"
@@ -18,20 +20,33 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"go.uber.org/fx"
 	"golang.org/x/sync/semaphore"
+	"gorm.io/gorm"
 )
 
 // 下载管理器
 type TorrentManager struct {
 	//读写分离锁 读写分离锁，读读不互斥
-	mu      sync.RWMutex
-	Cn      *container.Container
-	jobsMap map[string]*TorrentJob
-	client  *torrent.Client
-	sem     *semaphore.Weighted
+	mu          sync.RWMutex
+	jobsMap     map[string]*TorrentJob
+	client      *torrent.Client
+	ResourceDao *dao.ResourceDAO
+	cfg         *config.Config
+	sem         *semaphore.Weighted
 }
 
-func NewManager(cn *container.Container) (*TorrentManager, error) {
+// 命名规范：{构造名}Params
+type WailsAppParams struct {
+	fx.In // 必须内嵌 fx.In，告诉fx这是参数结构体
+
+	DB          *gorm.DB
+	I18n        *i18n.I18nService
+	ResourceDao *dao.ResourceDAO
+	Cfg         *config.Config
+}
+
+func NewManager(cn WailsAppParams) (*TorrentManager, error) {
 	// 1. 基础目录（必须）
 	c := torrent.NewDefaultClientConfig()
 	//打开全量调试日志，会打印 DHT、PEX、Tracker、Peer 连接、协议交互详情。排查网络 / 连不上 peer 的时候打开，生产务必关闭，日志量巨大。
@@ -97,10 +112,11 @@ func NewManager(cn *container.Container) (*TorrentManager, error) {
 		panic(err)
 	}
 	manager := &TorrentManager{
-		jobsMap: make(map[string]*TorrentJob),
-		client:  client,
-		Cn:      cn,
-		sem:     semaphore.NewWeighted(5),
+		jobsMap:     make(map[string]*TorrentJob),
+		client:      client,
+		ResourceDao: cn.ResourceDao,
+		cfg:         cn.Cfg,
+		sem:         semaphore.NewWeighted(5),
 	}
 	return manager, nil
 }
@@ -168,7 +184,7 @@ func (m *TorrentManager) startJob(job *TorrentJob) {
 		// 阻塞执行下载
 		j.StartDownload()
 		resource := j.job
-		err := m.Cn.ResourceDao.Save(resource)
+		err := m.ResourceDao.Save(resource)
 		if err != nil {
 			logger.Torrent.Error("更新数据异常", slog.Any("err", err))
 			return
@@ -224,11 +240,11 @@ func (m *TorrentManager) newTorrent(spec *torrent.TorrentSpec, magnet *string, f
 		TorrentPath:    filePath,
 		LocalStatus:    models.LocalStatusNotDownloaded,
 		DownloadStatus: models.JobStatus0,
-		LocalPath:      m.Cn.Cfg.DownloadDir,
+		LocalPath:      m.cfg.DownloadDir,
 		CreateTime:     &now,
 		UpdateTime:     &now,
 	}
-	err := m.Cn.ResourceDao.Save(jobResource)
+	err := m.ResourceDao.Save(jobResource)
 	if err != nil {
 		panic(err)
 	}
@@ -249,7 +265,7 @@ func (m *TorrentManager) newTorrent(spec *torrent.TorrentSpec, magnet *string, f
 		// mu:  sync.RWMutex零值，无需赋值
 	}
 	m.jobsMap[infoHash] = job
-	baseDir := m.Cn.Cfg.DownloadDir
+	baseDir := m.cfg.DownloadDir
 	pc, err := storage.NewDefaultPieceCompletionForDir(baseDir)
 	if err != nil {
 		panic(err)
@@ -304,7 +320,7 @@ func (m *TorrentManager) newTorrent(spec *torrent.TorrentSpec, magnet *string, f
 			job.mu.Unlock()
 
 			// 落库保存元信息
-			_ = m.Cn.ResourceDao.Save(job.job)
+			_ = m.ResourceDao.Save(job.job)
 			m.startJob(job)
 			return
 		case <-time.After(60 * 10 * time.Second):

@@ -2,19 +2,44 @@ package handler
 
 import (
 	"changeme/internal/container"
+	"changeme/internal/server"
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"go.uber.org/fx"
 )
 
 type VideoHandler struct {
 	cn *container.Container
 }
 
-func NewVideoHandler(container *container.Container) *VideoHandler {
+type VideoHandlerParams struct {
+	fx.In
+
+	Container *container.Container
+}
+
+func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
+
 	return &VideoHandler{
-		cn: container,
+		cn: params.Container,
 	}
+}
+
+func VideoRoute(h *VideoHandler) server.RouteOut {
+
+	return server.RouteOut{
+		Handler: h,
+	}
+}
+
+func (h *VideoHandler) RegisterRoutes(mux *http.ServeMux) {
+
+	mux.HandleFunc("/video/{id}", h.VideoLocal)
+
+	mux.HandleFunc("/stream/{id}", h.Stream)
+
 }
 
 func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {

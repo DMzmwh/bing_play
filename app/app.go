@@ -2,6 +2,7 @@ package app
 
 import (
 	"changeme/internal/container"
+	"changeme/internal/server/handler"
 	"context"
 	"embed"
 	"fmt"
@@ -34,6 +35,7 @@ func NewApp(assets embed.FS) *App {
 		db.Module,
 		container.Module,
 		i18n.Module,
+		handler.Module,
 		server.Module,
 		service.Module,
 		torrentmgr.Module,
@@ -52,6 +54,14 @@ func NewApp(assets embed.FS) *App {
 			return logger.Init(
 				cfg.DataDir,
 			)
+		}),
+
+		// 强制让后台服务进入 Fx 生命周期
+		fx.Invoke(func(
+			_ *server.Server,
+			_ *torrentmgr.TorrentManager,
+		) {
+
 		}),
 		// =========================
 		// 创建 Wails App
