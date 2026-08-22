@@ -1,12 +1,12 @@
 package i18n
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/BurntSushi/toml"
 	i18nlib "github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
@@ -26,11 +26,16 @@ func NewI18nService() (*I18nService, error) {
 		language.English,
 	)
 
-	bundle.RegisterUnmarshalFunc(
-		"toml",
-		toml.Unmarshal,
-	)
+	//bundle.RegisterUnmarshalFunc(
+	//	"toml",
+	//	toml.Unmarshal,
+	//)
 
+	// 注册 json 解析器（替换 toml.Unmarshal）
+	bundle.RegisterUnmarshalFunc(
+		"json",
+		json.Unmarshal,
+	)
 	err := loadLocales(
 		bundle,
 		LocaleDir,
@@ -61,7 +66,11 @@ func loadLocales(bundle *i18nlib.Bundle, dir string) error {
 		if file.IsDir() {
 			continue
 		}
-		if filepath.Ext(file.Name()) != ".toml" {
+		//if filepath.Ext(file.Name()) != ".toml" {
+		//	continue
+		//}
+		// 修改：只加载 .json 文件
+		if filepath.Ext(file.Name()) != ".json" {
 			continue
 		}
 		_, err := bundle.LoadMessageFile(
@@ -125,4 +134,60 @@ func (s *I18nService) SetLang(lang string) {
 	}
 
 	s.lang = lang
+}
+
+// GetLangList 获取locales目录下全部json语言文件名
+func (s *I18nService) GetLangList() ([]string, error) {
+	files, err := filepath.Glob(filepath.Join(LocaleDir, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range files {
+		res = append(res, filepath.Base(f))
+	}
+	return res, nil
+}
+
+// LoadLangFileToFlat 读取go-i18n嵌套json，转为扁平json字符串返回给vue-i18n
+func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
+	dir := LocaleDir
+	fullPath := filepath.Join(dir, filename)
+
+	// 防路径穿越
+	absTarget, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", err
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if filepath.Dir(absTarget) != absDir {
+		return "", fmt.Errorf("非法文件路径")
+	}
+
+	data, err := os.ReadFile(absTarget)
+	if err != nil {
+		return "", err
+	}
+
+	type msgItem struct {
+		Other string `json:"other"`
+	}
+	var nested map[string]msgItem
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return "", fmt.Errorf("解析翻译文件失败: %w", err)
+	}
+
+	flat := make(map[string]string)
+	for k, v := range nested {
+		flat[k] = v.Other
+	}
+
+	flatData, err := json.Marshal(flat)
+	if err != nil {
+		return "", err
+	}
+	return string(flatData), nil
 }
