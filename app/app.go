@@ -2,6 +2,7 @@ package app
 
 import (
 	"changeme/internal/container"
+	"changeme/internal/logger"
 	"changeme/internal/server/handler"
 	"context"
 	"embed"
@@ -11,7 +12,6 @@ import (
 	"changeme/internal/config"
 	"changeme/internal/db"
 	"changeme/internal/i18n"
-	"changeme/internal/logger"
 	"changeme/internal/server"
 	"changeme/internal/service"
 	"changeme/internal/torrentmgr"
@@ -32,17 +32,6 @@ func NewApp(assets embed.FS) *App {
 		// Modules
 		// =========================
 		config.Module,
-		db.Module,
-		container.Module,
-		i18n.Module,
-		handler.Module,
-		server.Module,
-		service.Module,
-		torrentmgr.Module,
-		// =========================
-		// Wails assets
-		// =========================
-		fx.Supply(assets),
 		// =========================
 		// Logger
 		// =========================
@@ -55,7 +44,17 @@ func NewApp(assets embed.FS) *App {
 				cfg.DataDir,
 			)
 		}),
-
+		db.Module,
+		container.Module,
+		i18n.Module,
+		handler.Module,
+		server.Module,
+		service.Module,
+		torrentmgr.Module,
+		// =========================
+		// Wails assets
+		// =========================
+		fx.Supply(assets),
 		// 强制让后台服务进入 Fx 生命周期
 		fx.Invoke(func(
 			_ *server.Server,
