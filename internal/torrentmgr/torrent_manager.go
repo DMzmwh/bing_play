@@ -330,3 +330,13 @@ func (m *TorrentManager) newTorrent(spec *torrent.TorrentSpec, magnet *string, f
 	}()
 	return nil
 }
+
+func (m *TorrentManager) GetJob(info string) (*TorrentJob, error) {
+	m.mu.RLock()
+	job := m.jobsMap[info]
+	m.mu.RUnlock()
+	if job == nil {
+		return nil, fmt.Errorf("任务不存在: %s", info)
+	}
+	return job, nil
+}

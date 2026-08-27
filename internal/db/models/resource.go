@@ -1,6 +1,7 @@
 package models
 
 import (
+	"changeme/internal/filetype"
 	"time"
 )
 
@@ -59,6 +60,9 @@ type Resource struct {
 
 	// MimeType 文件 MIME 类型，例如 video/mp4、video/x-matroska。
 	MimeType *string `gorm:"column:mime_type"`
+
+	// ResourceType 文件  类型，例如video
+	ResourceType filetype.Category `gorm:"column:resource_type"`
 
 	// =========================================================
 	// 本地文件状态

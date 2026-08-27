@@ -2,7 +2,9 @@ package torrentmgr
 
 import (
 	"changeme/internal/db/models"
+	"changeme/internal/filetype"
 	"changeme/internal/logger"
+	"changeme/internal/torrentmgr/models/vo"
 	"context"
 	"sync"
 	"time"
@@ -43,6 +45,13 @@ func (job *TorrentJob) StartDownload() {
 		job.torrent.AllowDataDownload()
 		job.torrent.DownloadAll()
 		job.Status = models.JobStatusDownloading
+		files := job.torrent.Files()
+		paths := make([]string, 0, len(files))
+		for _, file := range files {
+			paths = append(paths, file.Path())
+		}
+		resourceType := filetype.DetectResourceType(paths)
+		job.job.ResourceType = resourceType
 		job.mu.Unlock()
 	} else {
 		return
@@ -160,4 +169,62 @@ func (job *TorrentJob) CancelJob() {
 	if job.torrent != nil {
 		job.torrent.Drop()
 	}
+}
+
+func (job *TorrentJob) ToVO() *vo.TorrentJobVO {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+
+	t := job.torrent
+
+	jobVo := &vo.TorrentJobVO{
+		Job:           job.job,
+		Status:        job.Status,
+		DownloadSpeed: job.downloadSpeed,
+		UploadSpeed:   job.uploadSpeed,
+		Peers:         job.torrent.Stats().ActivePeers,
+	}
+
+	if t != nil && t.Info() != nil {
+		info := t.Info()
+		total := info.TotalLength()
+		completed := t.BytesCompleted()
+		if total > 0 {
+			jobVo.Progress = float64(completed) / float64(total) * 100
+		} else {
+			jobVo.Progress = 0
+		}
+		files := t.Files()
+		voFiles := make([]*vo.FileVo, 0, len(files))
+		for _, file := range files {
+			fileVo := &vo.FileVo{
+				Path: file.Path(),
+			}
+			voFiles = append(voFiles, fileVo)
+		}
+		jobVo.Files = voFiles
+		jobVo.Downloaded = completed
+		stats := t.Stats()
+		jobVo.Peers = stats.ActivePeers
+	}
+
+	return jobVo
+}
+
+// GetTorrent 导出方法，外部包调用
+func (j *TorrentJob) GetTorrent() *torrent.Torrent {
+	return j.torrent
+}
+
+// GetTorrent 导出方法，外部包调用
+func (j *TorrentJob) GetFile(path string) *torrent.File {
+	if path == "" {
+		return j.torrent.Files()[0]
+	}
+	for _, f := range j.torrent.Files() {
+		if f.Path() == path {
+			return f
+		}
+	}
+	return nil
 }

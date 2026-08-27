@@ -91,8 +91,7 @@ func (s *TorrentService) Get(hashInfo string) (*torrentmgr.TorrentJob, error) {
 	if hashInfo == "" {
 		return nil, fmt.Errorf("torrent hash is empty")
 	}
-
-	return nil, nil
+	return s.manager.GetJob(hashInfo)
 }
 
 // List 获取所有任务

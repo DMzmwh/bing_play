@@ -53,6 +53,8 @@ CREATE TABLE resources (
 
                            mime_type           TEXT,
     -- 文件 MIME 类型，例如 video/mp4、video/x-matroska
+                           resource_type           TEXT,
+    -- 文件类型
 
 
     -- =========================================================
