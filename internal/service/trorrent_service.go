@@ -33,6 +33,12 @@ func NewTorrentService(manager *torrentmgr.TorrentManager) *TorrentService {
 	}
 }
 
+func NewTorrentWailsService(s *TorrentService) ServiceOut {
+	return ServiceOut{
+		Service: application.NewService(s),
+	}
+}
+
 // ServiceStartup is called when the application starts
 func (s *TorrentService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	logger.App.Info("TorrentService ServiceStartup")

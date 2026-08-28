@@ -5,26 +5,32 @@ import (
 	"changeme/internal/logger"
 	"changeme/internal/service"
 	"embed"
-	"time"
-
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"go.uber.org/fx"
 )
 
-func NewWailsApp(
-	cfg *config.Config,
-	torrentService *service.TorrentService,
-	greetService *service.GreetService,
-	assets embed.FS,
-) *application.App {
+type WailsAppParams struct {
+	fx.In
+
+	Config *config.Config
+
+	UpdaterService *service.UpdaterService
+	Services       []application.Service `group:"wails-services"`
+	Assets         embed.FS
+}
+
+func NewWailsApp(p WailsAppParams) *application.App {
+	cfg := p.Config
+	assets := p.Assets
+	services := p.Services
+
+	services = append(services, application.NewService(p.UpdaterService)) // 添加更新服务
 
 	app := application.New(application.Options{
 		Name:        cfg.AppName,
 		Description: "A demo of using raw HTML & CSS",
 
-		Services: []application.Service{
-			application.NewService(greetService),
-			application.NewService(torrentService),
-		},
+		Services: services,
 
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -71,13 +77,6 @@ func NewWailsApp(
 			URL: "/",
 		},
 	)
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
-		}
-	}()
-
+	p.UpdaterService.Init(app)
 	return app
 }

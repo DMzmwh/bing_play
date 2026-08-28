@@ -1,3 +1,50 @@
+/* 1. 去掉默认 margin / padding */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 2. html/body 基础 */
+html,
+body {
+  width: 100%;
+  height: 100%;
+  font-family:
+    "Nunito",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Roboto",
+    "Oxygen",
+    "Ubuntu",
+    "Cantarell",
+    "Fira Sans",
+    "Droid Sans",
+    "Helvetica Neue",
+    sans-serif;
+  background-color: #f5f6f7;
+  color: white;
+}
+
+/* 3. 列表 */
+ul,
+ol {
+  list-style: none;
+}
+
+/* 4. 图片 */
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* 5. 超链接 */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
 @font-face {
   font-family: "Nunito";
   font-style: normal;
