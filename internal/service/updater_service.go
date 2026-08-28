@@ -41,13 +41,9 @@ type UpdaterService struct {
 }
 
 // NewUpdaterService 创建 UpdaterService。
-func NewUpdaterService(
-	repository string,
-	version string,
-) *UpdaterService {
+func NewUpdaterService() *UpdaterService {
 	return &UpdaterService{
-		repository: repository,
-		version:    version,
+		repository: "wailsapp/updater-demo",
 	}
 }
 
@@ -56,8 +52,9 @@ func NewUpdaterService(
 // app 在 Wails App 创建完成后传入。
 // UpdaterService 由 Fx 创建，而 application.App
 // 由 NewWailsApp 创建，因此不能在构造函数中直接注入 app。
-func (m *UpdaterService) Init(app *application.App) error {
+func (m *UpdaterService) Init(app *application.App, version string) error {
 	m.app = app
+	m.version = version
 
 	gh, err := github.New(github.Config{
 		Repository:    m.repository,
@@ -144,7 +141,9 @@ func (m *UpdaterService) check() (*UpdateInfo, error) {
 	if update == nil {
 		return nil, nil
 	}
-
+	//data, err := json.Marshal(update)
+	//jsonString := string(data)
+	//log.Printf("updater found new version: %s", jsonString)
 	return &UpdateInfo{
 		Version: update.Version,
 	}, nil

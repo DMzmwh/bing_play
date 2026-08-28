@@ -9,6 +9,8 @@ import (
 	"go.uber.org/fx"
 )
 
+var Version = "v1.0.1"
+
 type WailsAppParams struct {
 	fx.In
 
@@ -77,6 +79,6 @@ func NewWailsApp(p WailsAppParams) *application.App {
 			URL: "/",
 		},
 	)
-	p.UpdaterService.Init(app)
+	p.UpdaterService.Init(app, Version)
 	return app
 }
