@@ -191,3 +191,17 @@ func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
 	}
 	return string(flatData), nil
 }
+
+// SwitchLang 统一入口：切换语言，返回扁平翻译文本给前端
+func (s *I18nService) SwitchLang(lang string) (string, error) {
+	// 1. 后端切换语言（内部校验，非法自动回退默认语言）
+	s.SetLang(lang)
+	// 2. 获取最终生效语言（防止传入不存在的语言被回退）
+	s.mu.RLock()
+	useLang := s.lang
+	s.mu.RUnlock()
+	// ✅ 修复：传入 useLang 拼接文件名
+	filename := fmt.Sprintf("active.%s.json", useLang)
+	// 3. 读取对应语言文件，转为扁平JSON返回给Vue-i18n
+	return s.LoadLangFileToFlat(filename)
+}
