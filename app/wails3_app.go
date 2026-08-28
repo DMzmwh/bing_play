@@ -52,16 +52,20 @@ func NewWailsApp(
 
 	app.Window.NewWithOptions(
 		application.WebviewWindowOptions{
-			Title:  cfg.AppName,
-			Width:  1000,
-			Height: 618,
-
+			Title:     cfg.AppName,
+			Width:     1000,
+			Height:    618,
+			Frameless: true, // ✅ 核心：去掉系统标题栏、去掉窗口边框
 			Mac: application.MacWindow{
 				InvisibleTitleBarHeight: 50,
 				Backdrop:                application.MacBackdropTranslucent,
-				TitleBar:                application.MacTitleBarHiddenInset,
+				TitleBar:                application.MacTitleBarHidden, // mac彻底隐藏标题栏
 			},
-
+			Windows: application.WindowsWindow{
+				//HiddenOnTaskbar: true, // Windows隐藏标题栏
+				// Windows可选：开启亚克力/云母透明效果（Win11）
+				// BackdropType: application.BackdropMica,
+			},
 			BackgroundColour: application.NewRGB(6, 7, 15),
 
 			URL: "/",

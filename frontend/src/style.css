@@ -1,0 +1,16 @@
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  src:
+    local(""),
+    url("assets/fonts/nunito-v16-latin-regular.woff2") format("woff2");
+}
+
+#app {
+  /* Wails优先使用dvh，解决Windows下底部留白 */
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden; /* 关键：关闭全局滚动条，由内部滚动处理列表 */
+  text-align: center;
+}

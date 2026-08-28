@@ -43,12 +43,12 @@ body {
     user-select: none;
     /* Drag the window by its background. Interactive controls opt out with
        --wails-draggable: no-drag (the property inherits). */
-    --wails-draggable: drag;
+    /*--wails-draggable: drag;*/
 }
 
 /* Framework mount nodes (#start / #root) shouldn't affect layout, so the
    body flex centering applies directly to .container. */
-#app, #root { display: contents; }
+/*#app, #root { display: contents; }*/
 
 /* Interactive elements: clickable (not draggable) and, for the input, selectable. */
 .brand-mark, .brand-badge, .input-box, .btn, .footer-docs, .toast {
@@ -83,8 +83,6 @@ body {
     /* Respect mobile safe areas (notch / home indicator). No bottom padding:
        the footer sits flush at the bottom edge. */
     /* Wider outer margins on the golden scale (φ² top/right, φ³ left). */
-    padding: max(var(--s-4), env(safe-area-inset-top)) max(var(--s-4), env(safe-area-inset-right))
-             0 max(var(--s-5), env(safe-area-inset-left));
 }
 
 .container {

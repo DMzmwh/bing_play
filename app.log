@@ -1,1 +1,10 @@
-start fx: could not build arguments for function "changeme/app".NewApp.func2 (D:/go/GoCode/bing_play/app/app.go:65): failed to build *server.Server: could not build arguments for function "changeme/internal/server".NewServer (D:/go/GoCode/bing_play/internal/server/server.go:18): failed to build *server.Route: missing dependencies for function "changeme/internal/server".NewRoute (D:/go/GoCode/bing_play/internal/server/route.go:22): missing type: []server.RouteRegistrar
+start fx: fx.Provide(changeme/internal/server/handler.NewVideoHandler()) from:
+changeme/internal/server/handler.init
+	D:/go/GoCode/bing_play/internal/server/handler/module.go:9
+runtime.doInit1
+	D:/go/Go/src/runtime/proc.go:8103
+runtime.doInit
+	D:/go/Go/src/runtime/proc.go:8070
+runtime.main
+	D:/go/Go/src/runtime/proc.go:258
+Failed: cannot provide function "changeme/internal/server/handler".NewVideoHandler (D:/go/GoCode/bing_play/internal/server/handler/video_handler.go:29): bad argument 1: bad field "resourceDao" of handler.VideoHandlerParams: unexported fields not allowed in dig.In, did you mean to export "resourceDao" (*dao.ResourceDAO)?

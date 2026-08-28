@@ -22,14 +22,14 @@ type VideoHandler struct {
 
 type VideoHandlerParams struct {
 	fx.In
-	resourceDao    *dao.ResourceDAO
-	torrentManager *torrentmgr.TorrentManager
+	ResourceDao    *dao.ResourceDAO
+	TorrentManager *torrentmgr.TorrentManager
 }
 
 func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
 
 	return &VideoHandler{
-		resourceDao: params.resourceDao,
+		resourceDao: params.ResourceDao,
 	}
 }
 
