@@ -3,7 +3,7 @@ package app
 import (
 	"changeme/internal/config"
 	"changeme/internal/logger"
-	"changeme/internal/service"
+	"changeme/internal/utils/updater"
 	"embed"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/fx"
@@ -14,19 +14,15 @@ var Version = "v1.0.1"
 type WailsAppParams struct {
 	fx.In
 
-	Config *config.Config
-
-	UpdaterService *service.UpdaterService
-	Services       []application.Service `group:"wails-services"`
-	Assets         embed.FS
+	Config   *config.Config
+	Services []application.Service `group:"wails-services"`
+	Assets   embed.FS
 }
 
 func NewWailsApp(p WailsAppParams) *application.App {
 	cfg := p.Config
 	assets := p.Assets
 	services := p.Services
-
-	services = append(services, application.NewService(p.UpdaterService)) // 添加更新服务
 
 	app := application.New(application.Options{
 		Name:        cfg.AppName,
@@ -79,6 +75,6 @@ func NewWailsApp(p WailsAppParams) *application.App {
 			URL: "/",
 		},
 	)
-	p.UpdaterService.Init(app, Version)
+	updater.Init(app, Version)
 	return app
 }

@@ -20,7 +20,5 @@ var Module = fx.Module(
 
 		NewGreetService,
 		NewGreetWailsService,
-
-		NewUpdaterService,
 	),
 )
