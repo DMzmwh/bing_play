@@ -1,7 +1,7 @@
 .task
 .idea
 bin
-data
+data/
 frontend/dist
 frontend/bindings
 frontend/node_modules
