@@ -1,10 +1,11 @@
 package app
 
 import (
-	"changeme/internal/config"
-	"changeme/internal/logger"
-	"changeme/internal/utils/updater"
 	"embed"
+
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/utils/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/fx"
 )

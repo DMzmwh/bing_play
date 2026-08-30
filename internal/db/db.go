@@ -1,9 +1,9 @@
 package db
 
 import (
-	"changeme/internal/config"
-	"changeme/internal/logger"
 	"database/sql"
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/logger"
 	"log/slog"
 	"os"
 	"path/filepath"

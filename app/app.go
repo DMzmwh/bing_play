@@ -1,20 +1,20 @@
 package app
 
 import (
-	"changeme/internal/container"
-	"changeme/internal/logger"
-	"changeme/internal/server/handler"
 	"context"
 	"embed"
 	"fmt"
+	"github.com/bing/bing-play/internal/container"
+	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/server/handler"
 	"time"
 
-	"changeme/internal/config"
-	"changeme/internal/db"
-	"changeme/internal/i18n"
-	"changeme/internal/server"
-	"changeme/internal/service"
-	"changeme/internal/torrentmgr"
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/db"
+	"github.com/bing/bing-play/internal/i18n"
+	"github.com/bing/bing-play/internal/server"
+	"github.com/bing/bing-play/internal/service"
+	"github.com/bing/bing-play/internal/torrentmgr"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/fx"

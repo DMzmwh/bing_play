@@ -1,6 +1,6 @@
 package vo
 
-import "changeme/internal/db/models"
+import "github.com/bing/bing-play/internal/db/models"
 
 type TorrentJobVO struct {
 	Job      *models.Resource

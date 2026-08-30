@@ -1,7 +1,7 @@
 package db
 
 import (
-	"changeme/internal/db/dao"
+	"github.com/bing/bing-play/internal/db/dao"
 
 	"go.uber.org/fx"
 )

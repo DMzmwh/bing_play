@@ -1,9 +1,9 @@
 package container
 
 import (
-	"changeme/internal/config"
-	"changeme/internal/db/dao"
-	"changeme/internal/i18n"
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/db/dao"
+	"github.com/bing/bing-play/internal/i18n"
 
 	"gorm.io/gorm"
 )

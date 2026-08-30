@@ -1,8 +1,8 @@
 package concurrent
 
 import (
-	"changeme/internal/logger"
 	"context"
+	"github.com/bing/bing-play/internal/logger"
 	"runtime/debug"
 
 	"golang.org/x/sync/semaphore"

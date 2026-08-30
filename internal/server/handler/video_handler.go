@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"changeme/internal/db/dao"
-	"changeme/internal/db/models"
-	"changeme/internal/server"
-	"changeme/internal/torrentmgr"
 	"encoding/json"
 	"fmt"
+	"github.com/bing/bing-play/internal/db/dao"
+	"github.com/bing/bing-play/internal/db/models"
+	"github.com/bing/bing-play/internal/server"
+	"github.com/bing/bing-play/internal/torrentmgr"
 	"net/http"
 	"os"
 	"path/filepath"

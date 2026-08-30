@@ -1,7 +1,7 @@
 package models
 
 import (
-	"changeme/internal/filetype"
+	"github.com/bing/bing-play/internal/filetype"
 	"time"
 )
 

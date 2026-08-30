@@ -1,9 +1,9 @@
 package server
 
 import (
-	"changeme/internal/logger"
 	"context"
 	"fmt"
+	"github.com/bing/bing-play/internal/logger"
 	"net"
 	"net/http"
 

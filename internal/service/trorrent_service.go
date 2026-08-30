@@ -1,10 +1,10 @@
 package service
 
 import (
-	"changeme/internal/logger"
-	"changeme/internal/torrentmgr"
 	"context"
 	"fmt"
+	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/torrentmgr"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -42,7 +42,7 @@ func NewTorrentWailsService(s *TorrentService) ServiceOut {
 // ServiceStartup is called when the application starts
 func (s *TorrentService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	logger.App.Info("TorrentService ServiceStartup")
-
+	//return fmt.Errorf("failed to initialise: %w", err)
 	return nil
 }
 

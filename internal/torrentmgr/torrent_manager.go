@@ -1,12 +1,6 @@
 package torrentmgr
 
 import (
-	"changeme/internal/config"
-	"changeme/internal/db/dao"
-	"changeme/internal/db/models"
-	"changeme/internal/i18n"
-	"changeme/internal/logger"
-	"changeme/internal/utils/ip"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,6 +9,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/db/dao"
+	"github.com/bing/bing-play/internal/db/models"
+	"github.com/bing/bing-play/internal/i18n"
+	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/utils/ip"
 
 	"github.com/anacrolix/dht/v2"
 	"github.com/anacrolix/torrent"

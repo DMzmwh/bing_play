@@ -1,8 +1,8 @@
 package dao
 
 import (
-	"changeme/internal/db/models"
 	"errors"
+	"github.com/bing/bing-play/internal/db/models"
 
 	"gorm.io/gorm"
 )

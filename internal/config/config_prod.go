@@ -3,8 +3,8 @@
 package config
 
 import (
-	"changeme/internal/utils"
 	"fmt"
+	"github.com/bing/bing-play/internal/utils"
 	"path/filepath"
 )
 

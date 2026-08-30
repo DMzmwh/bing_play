@@ -1,13 +1,14 @@
 package torrentmgr
 
 import (
-	"changeme/internal/db/models"
-	"changeme/internal/filetype"
-	"changeme/internal/logger"
-	"changeme/internal/torrentmgr/models/vo"
 	"context"
 	"sync"
 	"time"
+
+	"github.com/bing/bing-play/internal/db/models"
+	"github.com/bing/bing-play/internal/filetype"
+	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/torrentmgr/models/vo"
 
 	"github.com/anacrolix/torrent"
 )
