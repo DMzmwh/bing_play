@@ -63,11 +63,11 @@ body {
     position: fixed;
     inset: 0;
     z-index: -1;
-    background:
-            linear-gradient(90deg, rgba(6, 7, 15, 0.94) 0%, rgba(6, 7, 15, 0.78) 32%,
-            rgba(6, 7, 15, 0.42) 64%, rgba(6, 7, 15, 0.30) 100%),
-            linear-gradient(0deg, rgba(6, 7, 15, 0.70) 0%, rgba(6, 7, 15, 0.10) 45%),
-            url("/bg-desktop.jpg") center / cover no-repeat;
+    /*background:*/
+    /*        linear-gradient(90deg, rgba(6, 7, 15, 0.94) 0%, rgba(6, 7, 15, 0.78) 32%,*/
+    /*        rgba(6, 7, 15, 0.42) 64%, rgba(6, 7, 15, 0.30) 100%),*/
+    /*        linear-gradient(0deg, rgba(6, 7, 15, 0.70) 0%, rgba(6, 7, 15, 0.10) 45%),*/
+    /*        url("/bg-desktop.jpg") center / cover no-repeat;*/
 }
 
 /* ========== 自定义滚动条 Webkit (Wails生效) ========== */

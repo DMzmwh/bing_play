@@ -24,7 +24,7 @@
         </div>
 
         <div class="body">
-            <Play />
+            <router-view/>
         </div>
     </div>
 </template>
