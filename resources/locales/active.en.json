@@ -1,4 +1,9 @@
 {
+  "locale": {
+    "code": "zh-CN",
+    "name": "Chinese (Simplified)",
+    "nativeName": "简体中文"
+  },
   "hello": {
     "description": "greeting",
     "other": "Hello, {{.Name}}"

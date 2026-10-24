@@ -1,4 +1,9 @@
 {
+  "locale": {
+    "code": "en",
+    "name": "English",
+    "nativeName": "English"
+  },
   "hello": {
     "description": "问候语",
     "other": "你好，{{.Name}}"

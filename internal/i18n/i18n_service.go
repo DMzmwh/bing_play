@@ -20,6 +20,13 @@ type I18nService struct {
 	mu          sync.RWMutex
 }
 
+type LocaleInfo struct {
+	Code       string `json:"code"`
+	Name       string `json:"name"`
+	NativeName string `json:"nativeName"`
+	Filename   string `json:"filename"`
+}
+
 func NewI18nService() (*I18nService, error) {
 	defaultLang := "en"
 	bundle := i18nlib.NewBundle(
@@ -147,6 +154,42 @@ func (s *I18nService) GetLangList() ([]string, error) {
 		res = append(res, filepath.Base(f))
 	}
 	return res, nil
+}
+
+func (s *I18nService) GetLangListV2() ([]LocaleInfo, error) {
+	files, err := filepath.Glob(filepath.Join(LocaleDir, "active.*.json"))
+	if err != nil {
+		return nil, err
+	}
+
+	locales := make([]LocaleInfo, 0, len(files))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("读取语言文件 %s: %w", file, err)
+		}
+
+		var content struct {
+			Locale LocaleInfo `json:"locale"`
+		}
+		if err := json.Unmarshal(data, &content); err != nil {
+			return nil, fmt.Errorf("解析语言文件 %s: %w", file, err)
+		}
+
+		info := content.Locale
+		if info.Code == "" || info.NativeName == "" {
+			continue
+		}
+
+		if _, err := language.Parse(info.Code); err != nil {
+			continue
+		}
+
+		info.Filename = filepath.Base(file)
+		locales = append(locales, info)
+	}
+
+	return locales, nil
 }
 
 // LoadLangFileToFlat 读取go-i18n嵌套json，转为扁平json字符串返回给vue-i18n
