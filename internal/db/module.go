@@ -11,6 +11,7 @@ var Module = fx.Module(
 
 	fx.Provide(
 		InitDB,
+		dao.NewAppSettingDAO,
 		dao.NewResourceDAO,
 	),
 )

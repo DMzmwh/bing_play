@@ -7,16 +7,19 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/bing/bing-play/internal/db/dao"
 	i18nlib "github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
 
 const LocaleDir = "./resources/locales"
+const SettingKeyLanguage = "language"
 
 type I18nService struct {
 	bundle      *i18nlib.Bundle
 	lang        string
 	defaultLang string
+	settingDAO  *dao.AppSettingDAO
 	mu          sync.RWMutex
 }
 
@@ -27,12 +30,16 @@ type LocaleInfo struct {
 	Filename   string `json:"filename"`
 }
 
-func NewI18nService() (*I18nService, error) {
+func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
 	defaultLang := "en"
 	bundle := i18nlib.NewBundle(
 		language.English,
 	)
 
+	savedLang, _ := settingDAO.Get(SettingKeyLanguage)
+	if savedLang == "" {
+		savedLang = defaultLang
+	}
 	//bundle.RegisterUnmarshalFunc(
 	//	"toml",
 	//	toml.Unmarshal,
@@ -55,7 +62,7 @@ func NewI18nService() (*I18nService, error) {
 	return &I18nService{
 		bundle:      bundle,
 		defaultLang: defaultLang,
-		lang:        defaultLang,
+		lang:        savedLang,
 	}, nil
 }
 
@@ -141,6 +148,7 @@ func (s *I18nService) SetLang(lang string) {
 	}
 
 	s.lang = lang
+	s.settingDAO.Set(SettingKeyLanguage, lang)
 }
 
 // GetLangList 获取locales目录下全部json语言文件名
@@ -236,10 +244,7 @@ func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
 }
 
 // SwitchLang 统一入口：切换语言，返回扁平翻译文本给前端
-func (s *I18nService) SwitchLang(lang string) (string, error) {
-	// 1. 后端切换语言（内部校验，非法自动回退默认语言）
-	s.SetLang(lang)
-	// 2. 获取最终生效语言（防止传入不存在的语言被回退）
+func (s *I18nService) GetLangInfo() (string, error) {
 	s.mu.RLock()
 	useLang := s.lang
 	s.mu.RUnlock()
