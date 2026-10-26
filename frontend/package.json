@@ -11,14 +11,13 @@
   },
   "dependencies": {
     "@wailsio/runtime": "latest",
-    "dplayer": "^1.27.1",
+    "artplayer": "^5.4.0",
     "naive-ui": "2.45.3",
     "vfonts": "0.0.3",
     "vue": "3.5.41",
     "vue-router": "4.5.1"
   },
   "devDependencies": {
-    "@types/dplayer": "^1.25.6",
     "@vitejs/plugin-vue": "5.2.4",
     "sass-embedded": "^1.103.1",
     "typescript": "5.7.3",

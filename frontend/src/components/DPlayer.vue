@@ -1,4 +1,4 @@
-<template>
+<!-- <template>
   <div ref="containerRef" class="dplayer-container"></div>
 </template>
 
@@ -51,10 +51,6 @@ function switchVideo(
   url: string,
   type: 'normal' | 'hls' | 'dash' | 'flv' = 'normal'
 ) {
-  player?.switchVideo({
-    url,
-    type
-  })
 }
 
 function getCurrentTime(): number {
@@ -85,4 +81,4 @@ defineExpose({
   width: 100%;
   height: 100%;
 }
-</style>
+</style> -->

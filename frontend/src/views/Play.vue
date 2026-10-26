@@ -34,18 +34,12 @@
 
         <!-- 中间播放区 -->
         <div class="center">
-            <div class="player-placeholder">
-                <div class="logo">🛰️</div>
-                <div class="text">荐片播放器</div>
-
-                <div class="info-card">
-                    <div>第01集</div>
-                    <div class="meta">播放进度 0% ｜ 播放次数 0</div>
-                    <div class="source">来源：网络p2p资源</div>
-                </div>
-
-                <n-button type="primary" class="open-btn">打开文件</n-button>
-            </div>
+            <ArtPlayer
+                :url="`http://127.0.0.1:9090/video/local/11`"
+                :options="{ fullscreenWeb:true, theme: '#3b82f6' }"
+                autoplay
+                @fullscreen-web="syncWindowMaximise"
+                />
             <!-- 底部控制条 -->
             <!-- <PlayerPanel /> -->
         </div>
@@ -53,6 +47,25 @@
 </template>
 
 <script lang="ts" setup>
+import { Window } from '@wailsio/runtime'
+
+// 进入播放器网页全屏前窗口是否已最大化，用于退出时恢复
+let wasMaximised = false
+
+async function syncWindowMaximise(state: boolean) {
+    try {
+        if (state) {
+            wasMaximised = await Window.IsMaximised()
+            if (!wasMaximised) {
+                await Window.Maximise()
+            }
+        } else if (!wasMaximised) {
+            await Window.UnMaximise()
+        }
+    } catch (error) {
+        console.warn('同步窗口最大化失败：', error)
+    }
+}
 </script>
 
 <style lang="scss" scoped>
