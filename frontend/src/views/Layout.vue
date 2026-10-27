@@ -73,7 +73,7 @@ const refresh = () => window.location.reload();
     flex: 0 0 50px;
     display: flex;
     align-items: center;
-    padding: 0 20px;
+    padding-left: 20px;
     box-sizing: border-box;
     background: #0f1620;
     border-bottom: 1px solid #1d2733;

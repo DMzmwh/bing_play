@@ -36,7 +36,7 @@
         <div class="center">
             <ArtPlayer
                 :url="`http://127.0.0.1:9090/video/local/11`"
-                :options="{ fullscreenWeb:true, theme: '#3b82f6' }"
+                :options="{ fullscreen:true,  fullscreenWeb:true, theme: '#3b82f6' }"
                 autoplay
                 @fullscreen-web="syncWindowMaximise"
                 />
@@ -53,18 +53,18 @@ import { Window } from '@wailsio/runtime'
 let wasMaximised = false
 
 async function syncWindowMaximise(state: boolean) {
-    try {
-        if (state) {
-            wasMaximised = await Window.IsMaximised()
-            if (!wasMaximised) {
-                await Window.Maximise()
-            }
-        } else if (!wasMaximised) {
-            await Window.UnMaximise()
-        }
-    } catch (error) {
-        console.warn('同步窗口最大化失败：', error)
-    }
+    // try {
+    //     if (state) {
+    //         wasMaximised = await Window.IsMaximised()
+    //         if (!wasMaximised) {
+    //             await Window.Maximise()
+    //         }
+    //     } else if (!wasMaximised) {
+    //         await Window.UnMaximise()
+    //     }
+    // } catch (error) {
+    //     console.warn('同步窗口最大化失败：', error)
+    // }
 }
 </script>
 
