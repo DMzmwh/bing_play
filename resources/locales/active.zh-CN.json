@@ -71,6 +71,14 @@
     "description": "拖入视频 - 登记资源内部失败兜底",
     "other": "打开视频失败"
   },
+  "video.empty_title": {
+    "description": "播放区 - 无视频时的空状态标题",
+    "other": "拖入视频开始播放"
+  },
+  "video.empty_hint": {
+    "description": "播放区 - 无视频时的空状态说明",
+    "other": "将本地视频文件拖到此处即可播放"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP 接口 - 请求方法不支持",

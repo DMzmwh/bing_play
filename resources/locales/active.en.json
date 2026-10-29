@@ -71,6 +71,14 @@
     "description": "dropped video - fallback for internal failures while registering the resource",
     "other": "Failed to open video"
   },
+  "video.empty_title": {
+    "description": "player - empty state title when no video is loaded",
+    "other": "Drop a video to start playing"
+  },
+  "video.empty_hint": {
+    "description": "player - empty state hint when no video is loaded",
+    "other": "Drag a local video file here to play it"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP API - request method not allowed",

@@ -71,6 +71,14 @@
     "description": "拖入影片 - 登記資源內部失敗備援",
     "other": "開啟影片失敗"
   },
+  "video.empty_title": {
+    "description": "播放區 - 無影片時的空狀態標題",
+    "other": "拖入影片開始播放"
+  },
+  "video.empty_hint": {
+    "description": "播放區 - 無影片時的空狀態說明",
+    "other": "將本機影片檔案拖到此處即可播放"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP 介面 - 請求方法不支援",
