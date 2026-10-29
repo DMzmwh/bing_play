@@ -22,6 +22,7 @@ var Module = fx.Module(
 		NewGreetWailsService,
 
 		NewVideoService,
+		NewVideoWailsService,
 
 		NewI18nWailsService,
 	),

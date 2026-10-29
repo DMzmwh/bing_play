@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
 	"github.com/bing/bing-play/internal/i18n"
 	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
-	"net/http"
-	"os"
-	"path/filepath"
-	"time"
 
 	"go.uber.org/fx"
 )
@@ -181,6 +182,7 @@ func (h *VideoHandler) videoLocal(
 	r *http.Request,
 	resource *models.Resource,
 ) {
+
 	filePath := resource.LocalPath
 	infoV, err := os.Stat(filePath)
 	if err != nil {

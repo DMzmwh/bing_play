@@ -60,6 +60,19 @@ func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 	return &r, err
 }
 
+// ListPlayable 查询播放列表所需的本地资源，按资源名称、创建时间排序。
+func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
+	var list []models.Resource
+
+	err := d.db.
+		Where("local_path <> ''").
+		Order("resource_name ASC, create_time ASC").
+		Find(&list).
+		Error
+
+	return list, err
+}
+
 // GetByLocalPath 根据本地文件路径查询资源
 func (d *ResourceDAO) GetByLocalPath(path string) (*models.Resource, error) {
 

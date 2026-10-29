@@ -18,9 +18,15 @@ const props = withDefaults(defineProps<{
   autoplay?: boolean
   /** 是否静音，未指定时沿用 options.muted */
   muted?: boolean
+  /** 是否存在上一个，false 时按钮置灰 */
+  hasPrev?: boolean
+  /** 是否存在下一个，false 时按钮置灰 */
+  hasNext?: boolean
 }>(), {
   url: '',
-  options: () => ({})
+  options: () => ({}),
+  hasPrev: false,
+  hasNext: false
 })
 
 const emit = defineEmits<{
@@ -32,13 +38,62 @@ const emit = defineEmits<{
   timeupdate: [currentTime: number]
   fullscreen: [state: boolean]
   fullscreenWeb: [state: boolean]
-  error: [error: Error]
+  prev: []
+  next: []
+  error: [error: Error, url: string]
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
 const player = shallowRef<Artplayer | null>(null)
 
 const currentUrl = computed(() => props.url || props.options.url || '')
+
+/** 上一个/下一个按钮图标，使用内联 SVG 以便直接交给 ArtPlayer controls */
+const PREV_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><rect x="5" y="5" width="2" height="14"/><path d="M19 5v14L9 12z"/></svg>`
+const NEXT_ICON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><rect x="17" y="5" width="2" height="14"/><path d="M5 5v14l10-7z"/></svg>`
+
+/** 从 ArtPlayer 语言包取文案，缺失时回退到默认中文 */
+function playerText(key: string, fallback: string): string {
+  const { lang, i18n } = props.options
+  const table = lang ? i18n?.[lang] : i18n && Object.values(i18n)[0]
+  return table?.[key] ?? fallback
+}
+
+/** 没有上一个/下一个时置灰并禁用点击 */
+function navControlStyle(enabled: boolean) {
+  return {
+    opacity: enabled ? '1' : '0.4',
+    cursor: enabled ? 'pointer' : 'not-allowed'
+  }
+}
+
+function prevControl() {
+  return {
+    name: 'prevEpisode',
+    position: 'left',
+    index: 11,
+    html: PREV_ICON,
+    tooltip: playerText('Previous', '上一个'),
+    style: navControlStyle(props.hasPrev),
+    click: () => {
+      if (props.hasPrev) emit('prev')
+    }
+  }
+}
+
+function nextControl() {
+  return {
+    name: 'nextEpisode',
+    position: 'left',
+    index: 12,
+    html: NEXT_ICON,
+    tooltip: playerText('Next', '下一个'),
+    style: navControlStyle(props.hasNext),
+    click: () => {
+      if (props.hasNext) emit('next')
+    }
+  }
+}
 
 function createPlayer(): void {
   if (!containerRef.value) return
@@ -48,7 +103,8 @@ function createPlayer(): void {
     url: currentUrl.value,
     autoplay: props.autoplay ?? props.options.autoplay ?? false,
     muted: props.muted ?? props.options.muted ?? false,
-    container: containerRef.value
+    container: containerRef.value,
+    controls: [...(props.options.controls ?? []), prevControl(), nextControl()]
   })
 
   art.on('ready', () => emit('ready', art))
@@ -59,19 +115,44 @@ function createPlayer(): void {
   art.on('video:timeupdate', () => emit('timeupdate', art.currentTime))
   art.on('fullscreen', (state) => emit('fullscreen', state))
   art.on('fullscreenWeb', (state) => emit('fullscreenWeb', state))
-  art.on('error', (error) => emit('error', error))
+  // 直接监听原生 video:error，事件立即触发且属于当前视频源
+  art.on('video:error', () => {
+    const mediaError = art.video.error
+    // 带上失败地址，调用方可以忽略切换后迟到的旧错误
+    emit('error', new Error(mediaError?.message || ''), art.video.currentSrc || art.url)
+  })
 
   player.value = art
 }
 
 onMounted(createPlayer)
 
-watch(currentUrl, (url) => {
+watch(currentUrl, async (url) => {
   const art = player.value
   if (!art || !url || art.url === url) return
 
-  art.switchUrl(url).catch((error: Error) => emit('error', error))
+  try {
+    await art.switchUrl(url)
+    // 播完后切换下一集时视频处于暂停态，switchUrl 不会自动续播，需要显式播放
+    if (props.autoplay ?? props.options.autoplay ?? false) {
+      await art.play()
+    }
+  } catch (error) {
+    emit('error', error as Error, url)
+  }
 })
+
+// 上一集/下一集可用状态变化时更新控制条按钮样式
+watch(
+  () => [props.hasPrev, props.hasNext] as const,
+  () => {
+    const art = player.value
+    if (!art) return
+
+    art.controls.update(prevControl())
+    art.controls.update(nextControl())
+  }
+)
 
 /** 切换语言后重建实例：ArtPlayer 的 tooltip/提示文案在初始化时写入，只能重建才能全部同步 */
 watch(

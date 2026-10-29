@@ -2,32 +2,42 @@
     <div class="play">
         <!-- 左侧播放列表 -->
         <div class="left-panel">
-            <div class="title">播放列表 [3]</div>
+            <div class="title">播放列表 [{{ playlist.length }}]</div>
 
-            <div class="search">
+            <!-- <div class="search">
                 <n-input size="small" placeholder="请输入搜索关键词" />
-            </div>
+            </div> -->
 
             <div class="list">
-                <div class="group">
-                    <div class="group-title">除恶 [16]</div>
+                <!-- 数据来自 VideoService.ListPlaylist，按 resourceName 分组；单条分组不显示组名 -->
+                <div v-for="group in playlistGroups" :key="group.title" class="group">
                     <div
-                        v-for="i in 50"
-                        :key="i"
-                        class="episode"
-                        :class="{ active: i === 1 }"
+                        v-if="group.videos.length > 1"
+                        class="group-title"
+                        @click="toggleGroup(group.title)"
                     >
-                        <span>{{ i.toString().padStart(2, '0') }} 第{{ i }}集</span>
-                        <span class="time">00:00:00</span>
+                        <n-icon
+                            size="14"
+                            :component="isGroupExpanded(group.title) ? CaretDown : CaretForward"
+                        />
+                        <span class="group-name">
+                            {{ group.title }} [{{ group.videos.length }}]
+                        </span>
                     </div>
-                </div>
-
-                <div class="group small">
-                    <div>牛气有为 [26]</div>
-                </div>
-
-                <div class="group small">
-                    <div>低智商犯罪 [24]</div>
+                    <!-- 只有播放中的分组默认展开，其余分组收起 -->
+                    <div v-show="group.videos.length === 1 || isGroupExpanded(group.title)">
+                        <div
+                            v-for="video in group.videos"
+                            :key="video.id"
+                            class="episode"
+                            :class="{ active: video.id === currentVideoId }"
+                            @click="playVideo(video)"
+                        >
+                            <span class="name">
+                                {{ video.fileName || video.resourceName }}
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -46,10 +56,15 @@
                 v-if="videoUrl"
                 :url="videoUrl"
                 :options="playerOptions"
+                :has-prev="canPlayPrev"
+                :has-next="canPlayNext"
                 autoplay
                 @fullscreen-web="syncWindowMaximise"
+                @prev="playPrev"
+                @next="playNext"
+                @ended="playNext"
                 @error="onPlayerError"
-                />
+            />
             <!-- 空状态：还没有播放地址时展示拖拽引导 -->
             <div v-if="!videoUrl && !dragOver" class="empty-state">
                 <svg class="empty-icon" viewBox="0 0 64 64" aria-hidden="true">
@@ -72,8 +87,16 @@
 
 <script lang="ts" setup>
 import { Window, Events } from '@wailsio/runtime'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { CaretDown, CaretForward } from '@vicons/ionicons5'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { i18nState, t } from '@/i18n'
+import {
+    ListPlaylist
+} from '../../bindings/github.com/bing/bing-play/internal/service/videoservice'
+import type {
+    OpenVideoResult,
+    PlaylistItem
+} from '../../bindings/github.com/bing/bing-play/internal/service/models'
 
 /** 后端视频服务地址，视频流只能通过 HTTP 拉取 */
 const API_BASE = 'http://127.0.0.1:9090'
@@ -82,8 +105,86 @@ const VIDEO_OPENED_EVENT = 'video:opened'
 /** 后端打开视频失败的事件名，需与 Go 端保持一致 */
 const VIDEO_OPEN_FAILED_EVENT = 'video:open-failed'
 
-/** 当前播放地址，为空时不渲染播放器，播放区保持空白 */
-const videoUrl = ref('')
+/** video:opened 事件载荷：current 为立即播放的视频 */
+interface VideoOpenedPayload {
+    current?: OpenVideoResult
+}
+
+/** 分组后的播放列表，组名为 resourceName */
+interface PlaylistGroup {
+    title: string
+    videos: PlaylistItem[]
+}
+
+/** 当前播放的视频 ID，为空时不渲染播放器，播放区保持空白 */
+const currentVideoId = ref<number | null>(null)
+/** 播放列表数据，统一来自 VideoService.ListPlaylist */
+const playlist = ref<PlaylistItem[]>([])
+/** 当前展开的分组；只允许一个分组展开，避免列表过长 */
+const expandedGroupTitle = ref<string | null>(null)
+/** 当前视频在播放列表中的位置，-1 表示不在列表中 */
+const currentIndex = computed(() =>
+    playlist.value.findIndex((video) => video.id === currentVideoId.value)
+)
+/** 是否存在上一个/下一个，用于控制条按钮置灰 */
+const canPlayPrev = computed(() => currentIndex.value > 0)
+const canPlayNext = computed(
+    () => currentIndex.value >= 0 && currentIndex.value < playlist.value.length - 1
+)
+
+/** 分组的 key：优先资源名，没有资源名时按文件名分组，避免出现空组名 */
+function groupKeyOf(video: PlaylistItem) {
+    return video.resourceName || video.fileName || String(video.id)
+}
+
+/** 按 resourceName 分组 */
+const playlistGroups = computed<PlaylistGroup[]>(() => {
+    const groups = new Map<string, PlaylistItem[]>()
+    for (const video of playlist.value) {
+        const key = groupKeyOf(video)
+        const group = groups.get(key)
+        if (group) {
+            group.push(video)
+        } else {
+            groups.set(key, [video])
+        }
+    }
+    return Array.from(groups, ([title, videos]) => ({ title, videos }))
+})
+
+/** 判断分组是否展开 */
+function isGroupExpanded(title: string) {
+    return expandedGroupTitle.value === title
+}
+
+/** 点击三角号切换分组展开状态 */
+function toggleGroup(title: string) {
+    expandedGroupTitle.value = isGroupExpanded(title) ? null : title
+}
+
+/** 播放中的视频所在分组，没有播放时返回 null */
+function playingGroupTitle() {
+    const id = currentVideoId.value
+    if (id === null) return null
+    const video = playlist.value.find((item) => item.id === id)
+    return video ? groupKeyOf(video) : null
+}
+
+// 播放切换或列表刷新后，只展开当前播放视频所在的分组，其余分组收起
+watch(
+    [currentVideoId, playlistGroups],
+    () => {
+        expandedGroupTitle.value = playingGroupTitle()
+    },
+    { immediate: true }
+)
+function videoUrlById(id: number): string {
+    return `${API_BASE}/video/${id}`
+}
+
+const videoUrl = computed(() =>
+    currentVideoId.value ? videoUrlById(currentVideoId.value) : ''
+)
 const dragOver = ref(false)
 const errorMsg = ref('')
 
@@ -110,18 +211,72 @@ function onDragLeave(event: DragEvent) {
     dragOver.value = false
 }
 
-function onPlayerError(error: Error) {
-    errorMsg.value = error?.message || t('video.play_failed')
+/** 切换到指定视频 */
+function selectVideo(video: PlaylistItem) {
+    errorMsg.value = ''
+    currentVideoId.value = video.id
+}
+
+/** 点击播放列表项切换当前视频 */
+function playVideo(video: PlaylistItem) {
+    selectVideo(video)
+}
+
+/** 播放失败时切到下一个；已是最后一个则显示错误提示 */
+function onPlayerError(_error: Error, failedUrl?: string) {
+    const failedId = currentVideoId.value
+    if (failedId === null) {
+        errorMsg.value = t('video.play_failed')
+        return
+    }
+    // 已切换到别的视频后旧视频源才抛出的错误，直接忽略
+    if (failedUrl && failedUrl !== videoUrlById(failedId)) return
+
+    if (canPlayNext.value) {
+        selectVideo(playlist.value[currentIndex.value + 1])
+        return
+    }
+
+    errorMsg.value = t('video.play_failed')
+}
+
+/** 播放上一个，已是第一个则不处理 */
+function playPrev() {
+    if (!canPlayPrev.value) return
+
+    selectVideo(playlist.value[currentIndex.value - 1])
+}
+
+/** 播放下一个；播完自动续播和点击按钮共用，已是最后一个则停止 */
+function playNext(): boolean {
+    if (!canPlayNext.value) return false
+
+    selectVideo(playlist.value[currentIndex.value + 1])
+    return true
+}
+
+/** 通过 Wails service 重新获取左侧播放列表，拖入文件后由后端事件触发 */
+async function fetchPlaylist() {
+    try {
+        playlist.value = (await ListPlaylist()) ?? []
+    } catch (error) {
+        console.warn('获取播放列表失败:', error)
+    }
 }
 
 onMounted(() => {
+    void fetchPlaylist()
+
     // 拖拽由 Go 侧处理（路径本来就在 Go 手里），前端只接收结果
     offVideoOpened = Events.On(VIDEO_OPENED_EVENT, (event) => {
-        const result = (event.data ?? {}) as { id?: number }
-        if (!result.id) return
+        const payload = (event.data ?? {}) as VideoOpenedPayload
+        const current = payload.current
+        if (!current?.id) return
 
         errorMsg.value = ''
-        videoUrl.value = `${API_BASE}/video/${result.id}`
+        currentVideoId.value = current.id
+        // 拖入的文件已写入数据库，重新拉取才能看到同组的其它剧集
+        void fetchPlaylist()
     })
 
     offVideoOpenFailed = Events.On(VIDEO_OPEN_FAILED_EVENT, (event) => {
@@ -191,9 +346,24 @@ async function syncWindowMaximise(state: boolean) {
 
 
 .group-title {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin-top: 10px;
     color: #999;
     font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.group-title:hover {
+    color: #ddd;
+}
+
+.group-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .episode {
@@ -205,6 +375,14 @@ async function syncWindowMaximise(state: boolean) {
     color: #bbb;
 }
 
+.episode .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .episode:hover {
     background: #182230;
 }
@@ -212,18 +390,6 @@ async function syncWindowMaximise(state: boolean) {
 .episode.active {
     background: #1e2a3a;
     color: #fff;
-}
-
-.time {
-    color: #666;
-}
-
-.group.small {
-    > div {
-        margin-top: 10px;
-        color: #999;
-        font-size: 12px;
-    }
 }
 
 /* center */

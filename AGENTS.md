@@ -3,7 +3,7 @@
 
 ## 技术栈
 - 后端：Go、Wails、Fx、GORM、SQLite。
-- 前端：Vue 3、TypeScript、Naive UI。
+- 前端：Vue 3、TypeScript、Naive UI、ArtPlayer。
 - 依赖管理遵循现有 go.mod 和 package.json。
 
 ## 开发原则

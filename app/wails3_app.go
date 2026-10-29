@@ -22,6 +22,12 @@ const (
 	VideoDropAreaID = "play-drop-area"
 )
 
+// VideoOpenedPayload 拖拽完成后推送给前端的当前视频。
+// 播放列表由前端通过 VideoService.ListPlaylist 重新获取。
+type VideoOpenedPayload struct {
+	Current *service.OpenVideoResult `json:"current"`
+}
+
 var Version = "v1.0.1"
 
 type WailsAppParams struct {
@@ -109,15 +115,42 @@ func NewWailsApp(p WailsAppParams) *application.App {
 			return
 		}
 
-		result, err := videoService.OpenLocalVideo(files[0])
-		if err != nil {
+		// 逐个登记拖入的文件：无效文件（文件夹、非视频等）只记录日志并跳过，
+		// 不影响同一批次的其它视频；重复路径按资源 ID 去重。
+		var (
+			results  []*service.OpenVideoResult
+			firstErr error
+			seen     = make(map[int64]struct{}, len(files))
+		)
+		for _, file := range files {
+			result, err := videoService.OpenLocalVideo(file)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				logger.App.Warn("打开拖入的视频失败", "path", file, "err", err)
+				continue
+			}
+			if _, exists := seen[result.ID]; exists {
+				continue
+			}
+			seen[result.ID] = struct{}{}
+			results = append(results, result)
+		}
+
+		if len(results) == 0 {
+			if firstErr == nil {
+				firstErr = service.ErrVideoOpenFailed
+			}
 			app.Event.Emit(EventVideoOpenFailed, map[string]string{
-				"message": i18nService.T(err.Error(), nil),
+				"message": i18nService.T(firstErr.Error(), nil),
 			})
 			return
 		}
 
-		app.Event.Emit(EventVideoOpened, result)
+		app.Event.Emit(EventVideoOpened, VideoOpenedPayload{
+			Current: results[0],
+		})
 	})
 
 	updater.Init(app, Version)

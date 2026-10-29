@@ -8,10 +8,11 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ArtPlayer: typeof import('./src/components/ArtPlayer.vue')['default']
-    DPlayer: typeof import('./src/components/DPlayer.vue')['default']
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
     NDropdown: typeof import('naive-ui')['NDropdown']
+    NIcon: typeof import('naive-ui')['NIcon']
     NInput: typeof import('naive-ui')['NInput']
+    NTooltip: typeof import('naive-ui')['NTooltip']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
