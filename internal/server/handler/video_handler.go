@@ -2,10 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
+	"github.com/bing/bing-play/internal/i18n"
 	"github.com/bing/bing-play/internal/server"
+	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
 	"net/http"
 	"os"
@@ -17,19 +20,25 @@ import (
 
 type VideoHandler struct {
 	resourceDao    *dao.ResourceDAO
+	videoService   *service.VideoService
+	i18nService    *i18n.I18nService
 	torrentManager *torrentmgr.TorrentManager
 }
 
 type VideoHandlerParams struct {
 	fx.In
 	ResourceDao    *dao.ResourceDAO
+	VideoService   *service.VideoService
+	I18n           *i18n.I18nService
 	TorrentManager *torrentmgr.TorrentManager
 }
 
 func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
 
 	return &VideoHandler{
-		resourceDao: params.ResourceDao,
+		resourceDao:  params.ResourceDao,
+		videoService: params.VideoService,
+		i18nService:  params.I18n,
 	}
 }
 
@@ -42,10 +51,80 @@ func VideoRoute(h *VideoHandler) server.RouteOut {
 
 func (h *VideoHandler) RegisterRoutes(mux *http.ServeMux) {
 
+	mux.HandleFunc("/video/open", h.OpenLocal)
 	mux.HandleFunc("/video/{id}", h.Video)
 	mux.HandleFunc("/video/local/{id}", h.VideoLocal)
 	mux.HandleFunc("/stream/{id}", h.Stream)
 
+}
+
+// openVideoRequest 前端拖拽视频后提交的请求体。
+type openVideoRequest struct {
+	Path string `json:"path"`
+}
+
+// openVideoResponse 后端返回的可播放资源信息。
+type openVideoResponse struct {
+	ID       int64  `json:"id"`
+	URL      string `json:"url"`
+	FileName string `json:"fileName"`
+	FileSize int64  `json:"fileSize"`
+	MimeType string `json:"mimeType"`
+}
+
+// OpenLocal 接收本地视频地址并返回播放地址。
+// 该接口是 VideoService 的 HTTP 适配层，业务逻辑（校验、登记、复用）都在 service。
+func (h *VideoHandler) OpenLocal(w http.ResponseWriter, r *http.Request) {
+
+	// 浏览器调试模式（vite）与 127.0.0.1:9090 属于跨域请求
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, h.i18nService.T("http.error_method_not_allowed", nil), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req openVideoRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, h.i18nService.T("http.error_invalid_request", nil), http.StatusBadRequest)
+		return
+	}
+
+	result, err := h.videoService.OpenLocalVideo(req.Path)
+	if err != nil {
+		h.writeOpenLocalError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(openVideoResponse{
+		ID:       result.ID,
+		URL:      fmt.Sprintf("http://%s/video/%d", r.Host, result.ID),
+		FileName: result.FileName,
+		FileSize: result.FileSize,
+		MimeType: result.MimeType,
+	})
+}
+
+// writeOpenLocalError 把业务错误映射为 HTTP 状态码，并按当前语言输出提示信息。
+func (h *VideoHandler) writeOpenLocalError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, service.ErrVideoPathEmpty),
+		errors.Is(err, service.ErrVideoIsDir),
+		errors.Is(err, service.ErrVideoUnsupported):
+		status = http.StatusBadRequest
+	case errors.Is(err, service.ErrVideoNotFound):
+		status = http.StatusNotFound
+	}
+	http.Error(w, h.i18nService.T(err.Error(), nil), status)
 }
 
 func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {

@@ -17,6 +17,30 @@
                 @dblclick="toggleMaximise"
             />
 
+            <n-dropdown
+                v-if="i18nState.locales.length"
+                trigger="click"
+                placement="bottom-end"
+                :options="langOptions"
+                @select="onLangChange"
+            >
+                <div class="right-icon lang-icon" :title="currentLangLabel">
+                    <svg
+                        class="globe"
+                        viewBox="0 0 24 24"
+                        width="16"
+                        height="16"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                    >
+                        <circle cx="12" cy="12" r="8.5" />
+                        <ellipse cx="12" cy="12" rx="4" ry="8.5" />
+                        <path d="M3.5 12h17" />
+                    </svg>
+                </div>
+            </n-dropdown>
             <div class="right-icon" @click="refresh">⟳</div>
             <div class="window-button" @click="minimise">─</div>
             <div class="window-button" @click="toggleMaximise">□</div>
@@ -30,20 +54,37 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Window } from "@wailsio/runtime";
-import Play from "@/views/Play.vue";
+import { i18nState, setLang, t } from "@/i18n";
 
 const router = useRouter();
 const route = useRoute();
 
-const tabs = [
-    { label: "播放", path: "/play" },
-    { label: "我的下载", path: "/download" },
-    { label: "影片库", path: "/library" },
-    { label: "找片", path: "/find" },
-];
+const tabs = computed(() => [
+    { label: t("nav.play"), path: "/play" },
+    { label: t("nav.download"), path: "/download" },
+    { label: t("nav.library"), path: "/library" },
+    { label: t("nav.find"), path: "/find" },
+]);
 
+const langOptions = computed(() =>
+    i18nState.locales.map((locale) => ({
+        key: locale.code,
+        // 当前语言加 ✓，避免下拉里看不出选中项
+        label: (locale.nativeName || locale.name) + (locale.code === i18nState.lang ? " ✓" : ""),
+    }))
+);
+
+const currentLangLabel = computed(() => {
+    const matched = i18nState.locales.find((locale) => locale.code === i18nState.lang);
+    return matched ? matched.nativeName || matched.name : i18nState.lang;
+});
+
+function onLangChange(lang: string) {
+    if (lang) void setLang(lang);
+}
 
 const toggleMaximise = () => Window.ToggleMaximise();
 
@@ -112,6 +153,14 @@ const refresh = () => window.location.reload();
     height: 100%;
     min-width: 30px;
     cursor: default;
+}
+
+.lang-icon .globe {
+    color: #aaa;
+}
+
+.lang-icon:hover .globe {
+    color: #fff;
 }
 
 .right-icon,

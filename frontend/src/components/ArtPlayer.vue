@@ -73,6 +73,42 @@ watch(currentUrl, (url) => {
   art.switchUrl(url).catch((error: Error) => emit('error', error))
 })
 
+/** 切换语言后重建实例：ArtPlayer 的 tooltip/提示文案在初始化时写入，只能重建才能全部同步 */
+watch(
+  () => [props.options.lang, props.options.i18n] as const,
+  ([lang, i18n]) => {
+    const table = lang ? i18n?.[lang] : i18n && Object.values(i18n)[0]
+    // 语言包还没加载完（空表）时跳过，等拿到文案后再重建一次
+    if (!player.value || !table || Object.keys(table).length === 0) return
+    recreatePlayer()
+  },
+  { deep: true }
+)
+
+/** 重建播放器并恢复播放状态，用于文案变化等必须重新初始化的场景 */
+function recreatePlayer(): void {
+  const art = player.value
+  if (!art) return
+
+  const currentTime = art.currentTime
+  const volume = art.volume
+  const playbackRate = art.playbackRate
+  const playing = art.playing
+
+  art.destroy()
+  createPlayer()
+
+  const next = player.value
+  if (!next) return
+
+  next.once('ready', () => {
+    next.currentTime = currentTime
+    next.volume = volume
+    next.playbackRate = playbackRate
+    if (playing) next.play().catch(() => undefined)
+  })
+}
+
 onBeforeUnmount(() => {
   player.value?.destroy()
   player.value = null

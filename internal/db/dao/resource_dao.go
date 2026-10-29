@@ -29,6 +29,13 @@ func (d *ResourceDAO) Save(r *models.Resource) error {
 	return d.db.Save(r).Error
 }
 
+// SaveLocalResource 保存本地视频资源。
+// 本地拖入的视频没有 Torrent InfoHash，保持该列为 NULL，
+// 避免触发 resources 表上 info_hash 的唯一索引冲突。
+func (d *ResourceDAO) SaveLocalResource(r *models.Resource) error {
+	return d.db.Omit("info_hash").Save(r).Error
+}
+
 // Get 根据ID查询
 func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 
@@ -43,6 +50,23 @@ func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 
 	err := d.db.
 		Where("id = ?", id).
+		First(&r).
+		Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+
+	return &r, err
+}
+
+// GetByLocalPath 根据本地文件路径查询资源
+func (d *ResourceDAO) GetByLocalPath(path string) (*models.Resource, error) {
+
+	var r models.Resource
+
+	err := d.db.
+		Where("local_path = ?", path).
 		First(&r).
 		Error
 

@@ -1,23 +1,127 @@
 {
   "locale": {
-    "code": "zh-CN",
-    "name": "Chinese (Simplified)",
-    "nativeName": "简体中文"
+    "code": "en",
+    "name": "English",
+    "nativeName": "English"
   },
-  "hello": {
-    "description": "greeting",
+
+  "common.hello": {
+    "description": "common - greeting sample, param Name",
     "other": "Hello, {{.Name}}"
   },
-  "error_file_not_found": {
-    "other": "file not found"
+  "common.error_file_not_found": {
+    "description": "common - file not found",
+    "other": "File not found"
   },
-  "btn_ok": {
+  "common.btn_ok": {
+    "description": "common button - confirm",
     "other": "OK"
   },
-  "btn_cancel": {
+  "common.btn_cancel": {
+    "description": "common button - cancel",
     "other": "Cancel"
   },
-  "btn_cancel_close": {
-    "other": "btn_cancel_close"
+  "common.btn_cancel_close": {
+    "description": "common button - cancel closing the window",
+    "other": "Cancel close"
+  },
+
+  "nav.play": {
+    "description": "top navigation - play",
+    "other": "Play"
+  },
+  "nav.download": {
+    "description": "top navigation - downloads",
+    "other": "Downloads"
+  },
+  "nav.library": {
+    "description": "top navigation - library",
+    "other": "Library"
+  },
+  "nav.find": {
+    "description": "top navigation - find videos",
+    "other": "Explore"
+  },
+
+  "video.drop_tip": {
+    "description": "player - shown while dragging a file over the play area",
+    "other": "Release to play the video"
+  },
+  "video.play_failed": {
+    "description": "player - fallback message when the player reports an error",
+    "other": "Failed to play video"
+  },
+  "video.error_empty_path": {
+    "description": "dropped video - empty path",
+    "other": "Video path is empty"
+  },
+  "video.error_not_found": {
+    "description": "dropped video - file not found",
+    "other": "Video file not found"
+  },
+  "video.error_is_dir": {
+    "description": "dropped video - target is a directory",
+    "other": "Folders are not supported, please drop a video file"
+  },
+  "video.error_unsupported": {
+    "description": "dropped video - unsupported file type",
+    "other": "Only video files are supported"
+  },
+  "video.error_open_failed": {
+    "description": "dropped video - fallback for internal failures while registering the resource",
+    "other": "Failed to open video"
+  },
+
+  "http.error_method_not_allowed": {
+    "description": "HTTP API - request method not allowed",
+    "other": "Request method not allowed"
+  },
+  "http.error_invalid_request": {
+    "description": "HTTP API - failed to parse request body",
+    "other": "Failed to parse request"
+  },
+
+  "update.available": {
+    "description": "updater - a new version is available, param Version",
+    "other": "New version available: {{.Version}}"
+  },
+
+  "art.player": {
+    "Video Info": "Video Info",
+    "Close": "Close",
+    "Video Load Failed": "Video Load Failed",
+    "Volume": "Volume",
+    "Play": "Play",
+    "Pause": "Pause",
+    "Rate": "Rate",
+    "Mute": "Mute",
+    "Video Flip": "Video Flip",
+    "Horizontal": "Horizontal",
+    "Vertical": "Vertical",
+    "Reconnect": "Reconnect",
+    "Show Setting": "Show Setting",
+    "Hide Setting": "Hide Setting",
+    "Screenshot": "Screenshot",
+    "Play Speed": "Play Speed",
+    "Aspect Ratio": "Aspect Ratio",
+    "Default": "Default",
+    "Normal": "Normal",
+    "Open": "Open",
+    "Switch Video": "Switch Video",
+    "Switch Subtitle": "Switch Subtitle",
+    "Fullscreen": "Fullscreen",
+    "Exit Fullscreen": "Exit Fullscreen",
+    "Web Fullscreen": "Web Fullscreen",
+    "Exit Web Fullscreen": "Exit Web Fullscreen",
+    "Mini Player": "Mini Player",
+    "PIP Mode": "PIP Mode",
+    "Exit PIP Mode": "Exit PIP Mode",
+    "PIP Not Supported": "PIP Not Supported",
+    "Fullscreen Not Supported": "Fullscreen Not Supported",
+    "Subtitle Offset": "Subtitle Offset",
+    "Last Seen": "Last Seen",
+    "Jump Play": "Jump Play",
+    "AirPlay": "AirPlay",
+    "AirPlay Not Available": "AirPlay Not Available"
   }
 }

@@ -1,23 +1,127 @@
 {
   "locale": {
-    "code": "en",
-    "name": "English",
-    "nativeName": "English"
+    "code": "zh-CN",
+    "name": "Chinese (Simplified)",
+    "nativeName": "简体中文"
   },
-  "hello": {
-    "description": "问候语",
+
+  "common.hello": {
+    "description": "通用 - 问候示例，参数 Name",
     "other": "你好，{{.Name}}"
   },
-  "error_file_not_found": {
+  "common.error_file_not_found": {
+    "description": "通用 - 文件不存在",
     "other": "文件不存在"
   },
-  "btn_ok": {
+  "common.btn_ok": {
+    "description": "通用按钮 - 确定",
     "other": "确定"
   },
-  "btn_cancel": {
+  "common.btn_cancel": {
+    "description": "通用按钮 - 取消",
     "other": "取消"
   },
-  "btn_cancel_close": {
+  "common.btn_cancel_close": {
+    "description": "通用按钮 - 取消关闭窗口",
     "other": "取消关闭"
+  },
+
+  "nav.play": {
+    "description": "顶部导航 - 播放",
+    "other": "播放"
+  },
+  "nav.download": {
+    "description": "顶部导航 - 下载",
+    "other": "我的下载"
+  },
+  "nav.library": {
+    "description": "顶部导航 - 影片库",
+    "other": "影片库"
+  },
+  "nav.find": {
+    "description": "顶部导航 - 找片",
+    "other": "找片"
+  },
+
+  "video.drop_tip": {
+    "description": "播放区 - 拖入文件时提示松开",
+    "other": "松开鼠标播放视频"
+  },
+  "video.play_failed": {
+    "description": "播放区 - 播放器失败兜底提示",
+    "other": "视频播放失败"
+  },
+  "video.error_empty_path": {
+    "description": "拖入视频 - 路径为空",
+    "other": "视频地址为空"
+  },
+  "video.error_not_found": {
+    "description": "拖入视频 - 文件不存在",
+    "other": "视频文件不存在"
+  },
+  "video.error_is_dir": {
+    "description": "拖入视频 - 目标是文件夹",
+    "other": "暂不支持拖入文件夹，请拖入视频文件"
+  },
+  "video.error_unsupported": {
+    "description": "拖入视频 - 非视频格式",
+    "other": "仅支持视频文件"
+  },
+  "video.error_open_failed": {
+    "description": "拖入视频 - 登记资源内部失败兜底",
+    "other": "打开视频失败"
+  },
+
+  "http.error_method_not_allowed": {
+    "description": "HTTP 接口 - 请求方法不支持",
+    "other": "请求方法不支持"
+  },
+  "http.error_invalid_request": {
+    "description": "HTTP 接口 - 请求体解析失败",
+    "other": "请求参数解析失败"
+  },
+
+  "update.available": {
+    "description": "更新检测 - 发现新版本，参数 Version",
+    "other": "发现新版本：{{.Version}}"
+  },
+
+  "art.player": {
+    "Video Info": "统计信息",
+    "Close": "关闭",
+    "Video Load Failed": "加载失败",
+    "Volume": "音量",
+    "Play": "播放",
+    "Pause": "暂停",
+    "Rate": "速度",
+    "Mute": "静音",
+    "Video Flip": "画面翻转",
+    "Horizontal": "水平",
+    "Vertical": "垂直",
+    "Reconnect": "重新连接",
+    "Show Setting": "显示设置",
+    "Hide Setting": "隐藏设置",
+    "Screenshot": "截图",
+    "Play Speed": "播放速度",
+    "Aspect Ratio": "画面比例",
+    "Default": "默认",
+    "Normal": "正常",
+    "Open": "打开",
+    "Switch Video": "切换",
+    "Switch Subtitle": "切换字幕",
+    "Fullscreen": "全屏",
+    "Exit Fullscreen": "退出全屏",
+    "Web Fullscreen": "网页全屏",
+    "Exit Web Fullscreen": "退出网页全屏",
+    "Mini Player": "迷你播放器",
+    "PIP Mode": "开启画中画",
+    "Exit PIP Mode": "退出画中画",
+    "PIP Not Supported": "不支持画中画",
+    "Fullscreen Not Supported": "不支持全屏",
+    "Subtitle Offset": "字幕偏移",
+    "Last Seen": "上次看到",
+    "Jump Play": "跳转播放",
+    "AirPlay": "隔空播放",
+    "AirPlay Not Available": "隔空播放不可用"
   }
 }

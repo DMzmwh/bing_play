@@ -3,17 +3,22 @@ package i18n
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/bing/bing-play/internal/db/dao"
+	"github.com/bing/bing-play/internal/logger"
 	i18nlib "github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
 
 const LocaleDir = "./resources/locales"
 const SettingKeyLanguage = "language"
+
+// PlayerLocaleKey ArtPlayer 自身文案在语言文件中的分组名，其内容直接使用 ArtPlayer 的原生 key
+const PlayerLocaleKey = "art.player"
 
 type I18nService struct {
 	bundle      *i18nlib.Bundle
@@ -63,6 +68,7 @@ func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
 		bundle:      bundle,
 		defaultLang: defaultLang,
 		lang:        savedLang,
+		settingDAO:  settingDAO,
 	}, nil
 }
 
@@ -120,13 +126,22 @@ func (s *I18nService) T(id string, data map[string]interface{}) string {
 	return msg
 }
 
+// GetCurrentLang 返回当前生效的语言代码，供前端初始化语言选择器使用。
+func (s *I18nService) GetCurrentLang() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lang
+}
+
 func (s *I18nService) SetLang(lang string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fmt.Println("语言-----" + lang)
 
 	// 判断语言是否存在
 	tag, err := language.Parse(lang)
 	if err != nil {
+		fmt.Println("语言---2--" + lang)
 		s.lang = s.defaultLang
 		return
 	}
@@ -148,7 +163,9 @@ func (s *I18nService) SetLang(lang string) {
 	}
 
 	s.lang = lang
-	s.settingDAO.Set(SettingKeyLanguage, lang)
+	if err := s.settingDAO.Set(SettingKeyLanguage, lang); err != nil {
+		logger.Error.Error("保存语言设置失败", slog.Any("err", err))
+	}
 }
 
 // GetLangList 获取locales目录下全部json语言文件名
@@ -218,22 +235,9 @@ func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
 		return "", fmt.Errorf("非法文件路径")
 	}
 
-	data, err := os.ReadFile(absTarget)
+	flat, err := loadFlatFile(absTarget)
 	if err != nil {
 		return "", err
-	}
-
-	type msgItem struct {
-		Other string `json:"other"`
-	}
-	var nested map[string]msgItem
-	if err := json.Unmarshal(data, &nested); err != nil {
-		return "", fmt.Errorf("解析翻译文件失败: %w", err)
-	}
-
-	flat := make(map[string]string)
-	for k, v := range nested {
-		flat[k] = v.Other
 	}
 
 	flatData, err := json.Marshal(flat)
@@ -241,6 +245,54 @@ func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
 		return "", err
 	}
 	return string(flatData), nil
+}
+
+// loadFlatFile 读取单个语言文件，转为 key -> 文本 的扁平表；
+// locale、art.player 这类非 go-i18n 消息结构的分组会被跳过
+func loadFlatFile(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("解析翻译文件失败: %w", err)
+	}
+
+	type msgItem struct {
+		Other string `json:"other"`
+	}
+	flat := make(map[string]string, len(raw))
+	for k, v := range raw {
+		var item msgItem
+		// 非消息结构（如 locale、art.player）解析后没有 other，直接跳过
+		if err := json.Unmarshal(v, &item); err != nil || item.Other == "" {
+			continue
+		}
+		flat[k] = item.Other
+	}
+	return flat, nil
+}
+
+// GetPlayerLang 返回当前语言下 ArtPlayer 自身的文案，内容直接取自语言文件的 art.player 分组
+func (s *I18nService) GetPlayerLang() (map[string]string, error) {
+	s.mu.RLock()
+	useLang := s.lang
+	s.mu.RUnlock()
+
+	data, err := os.ReadFile(filepath.Join(LocaleDir, fmt.Sprintf("active.%s.json", useLang)))
+	if err != nil {
+		return nil, err
+	}
+
+	var content struct {
+		Player map[string]string `json:"art.player"`
+	}
+	if err := json.Unmarshal(data, &content); err != nil {
+		return nil, fmt.Errorf("解析播放器文案失败: %w", err)
+	}
+	return content.Player, nil
 }
 
 // SwitchLang 统一入口：切换语言，返回扁平翻译文本给前端

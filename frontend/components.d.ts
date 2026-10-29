@@ -10,6 +10,7 @@ declare module 'vue' {
     ArtPlayer: typeof import('./src/components/ArtPlayer.vue')['default']
     DPlayer: typeof import('./src/components/DPlayer.vue')['default']
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
+    NDropdown: typeof import('naive-ui')['NDropdown']
     NInput: typeof import('naive-ui')['NInput']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

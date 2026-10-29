@@ -1,0 +1,127 @@
+{
+  "locale": {
+    "code": "zh-TW",
+    "name": "Chinese (Traditional)",
+    "nativeName": "繁體中文"
+  },
+
+  "common.hello": {
+    "description": "通用 - 問候範例，參數 Name",
+    "other": "你好，{{.Name}}"
+  },
+  "common.error_file_not_found": {
+    "description": "通用 - 檔案不存在",
+    "other": "檔案不存在"
+  },
+  "common.btn_ok": {
+    "description": "通用按鈕 - 確定",
+    "other": "確定"
+  },
+  "common.btn_cancel": {
+    "description": "通用按鈕 - 取消",
+    "other": "取消"
+  },
+  "common.btn_cancel_close": {
+    "description": "通用按鈕 - 取消關閉視窗",
+    "other": "取消關閉"
+  },
+
+  "nav.play": {
+    "description": "頂部導覽 - 播放",
+    "other": "播放"
+  },
+  "nav.download": {
+    "description": "頂部導覽 - 下載",
+    "other": "我的下載"
+  },
+  "nav.library": {
+    "description": "頂部導覽 - 影片庫",
+    "other": "影片庫"
+  },
+  "nav.find": {
+    "description": "頂部導覽 - 找片",
+    "other": "找片"
+  },
+
+  "video.drop_tip": {
+    "description": "播放區 - 拖入檔案時提示放開",
+    "other": "放開滑鼠播放影片"
+  },
+  "video.play_failed": {
+    "description": "播放區 - 播放器失敗備援提示",
+    "other": "影片播放失敗"
+  },
+  "video.error_empty_path": {
+    "description": "拖入影片 - 路徑為空",
+    "other": "影片路徑為空"
+  },
+  "video.error_not_found": {
+    "description": "拖入影片 - 檔案不存在",
+    "other": "影片檔案不存在"
+  },
+  "video.error_is_dir": {
+    "description": "拖入影片 - 目標是資料夾",
+    "other": "不支援拖入資料夾，請拖入影片檔案"
+  },
+  "video.error_unsupported": {
+    "description": "拖入影片 - 非影片格式",
+    "other": "僅支援影片檔案"
+  },
+  "video.error_open_failed": {
+    "description": "拖入影片 - 登記資源內部失敗備援",
+    "other": "開啟影片失敗"
+  },
+
+  "http.error_method_not_allowed": {
+    "description": "HTTP 介面 - 請求方法不支援",
+    "other": "請求方法不支援"
+  },
+  "http.error_invalid_request": {
+    "description": "HTTP 介面 - 請求內容解析失敗",
+    "other": "請求參數解析失敗"
+  },
+
+  "update.available": {
+    "description": "更新檢查 - 發現新版本，參數 Version",
+    "other": "發現新版本：{{.Version}}"
+  },
+
+  "art.player": {
+    "Video Info": "統計訊息",
+    "Close": "關閉",
+    "Video Load Failed": "載入失敗",
+    "Volume": "音量",
+    "Play": "播放",
+    "Pause": "暫停",
+    "Rate": "速度",
+    "Mute": "靜音",
+    "Video Flip": "畫面翻轉",
+    "Horizontal": "水平",
+    "Vertical": "垂直",
+    "Reconnect": "重新連接",
+    "Show Setting": "顯示设置",
+    "Hide Setting": "隱藏设置",
+    "Screenshot": "截圖",
+    "Play Speed": "播放速度",
+    "Aspect Ratio": "畫面比例",
+    "Default": "默認",
+    "Normal": "正常",
+    "Open": "打開",
+    "Switch Video": "切換",
+    "Switch Subtitle": "切換字幕",
+    "Fullscreen": "全屏",
+    "Exit Fullscreen": "退出全屏",
+    "Web Fullscreen": "網頁全屏",
+    "Exit Web Fullscreen": "退出網頁全屏",
+    "Mini Player": "迷你播放器",
+    "PIP Mode": "開啟畫中畫",
+    "Exit PIP Mode": "退出畫中畫",
+    "PIP Not Supported": "不支持畫中畫",
+    "Fullscreen Not Supported": "不支持全屏",
+    "Subtitle Offset": "字幕偏移",
+    "Last Seen": "上次看到",
+    "Jump Play": "跳轉播放",
+    "AirPlay": "隔空播放",
+    "AirPlay Not Available": "隔空播放不可用"
+  }
+}

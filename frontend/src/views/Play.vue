@@ -33,13 +33,24 @@
         </div>
 
         <!-- 中间播放区 -->
-        <div class="center">
+        <div
+            id="play-drop-area"
+            class="center"
+            data-file-drop-target
+            @dragenter.prevent="dragOver = true"
+            @dragover.prevent
+            @dragleave="onDragLeave"
+            @drop.prevent="dragOver = false"
+        >
             <ArtPlayer
-                :url="`http://127.0.0.1:9090/video/local/11`"
-                :options="{ fullscreen:true,  fullscreenWeb:true, theme: '#3b82f6' }"
+                :url="videoUrl"
+                :options="playerOptions"
                 autoplay
                 @fullscreen-web="syncWindowMaximise"
+                @error="onPlayerError"
                 />
+            <div v-if="dragOver" class="drop-tip">{{ t('video.drop_tip') }}</div>
+            <div v-if="errorMsg" class="error-tip">{{ errorMsg }}</div>
             <!-- 底部控制条 -->
             <!-- <PlayerPanel /> -->
         </div>
@@ -47,7 +58,68 @@
 </template>
 
 <script lang="ts" setup>
-import { Window } from '@wailsio/runtime'
+import { Window, Events } from '@wailsio/runtime'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { i18nState, t } from '@/i18n'
+
+/** 后端视频服务地址，视频流只能通过 HTTP 拉取 */
+const API_BASE = 'http://127.0.0.1:9090'
+/** 后端打开视频成功的事件名，需与 Go 端保持一致 */
+const VIDEO_OPENED_EVENT = 'video:opened'
+/** 后端打开视频失败的事件名，需与 Go 端保持一致 */
+const VIDEO_OPEN_FAILED_EVENT = 'video:open-failed'
+
+const videoUrl = ref(`${API_BASE}/video/local/11`)
+const dragOver = ref(false)
+const errorMsg = ref('')
+
+/** 播放器配置；ArtPlayer 文案格式为 { 语言代码: { 原生key: 文案 } }，语言由 lang 选项决定 */
+const playerOptions = computed(() => {
+    // ArtPlayer 内部会对 lang 做 lowerCase 匹配，语言文件里的分组 key 也统一用小写
+    const lang = i18nState.lang.toLowerCase()
+    return {
+        fullscreen: true,
+        fullscreenWeb: true,
+        theme: '#3b82f6',
+        lang,
+        i18n: { [lang]: { ...i18nState.playerMessages } }
+    }
+})
+
+let offVideoOpened: (() => void) | undefined
+let offVideoOpenFailed: (() => void) | undefined
+
+function onDragLeave(event: DragEvent) {
+    const zone = event.currentTarget as HTMLElement | null
+    // 指针仍在拖拽区域内（移入子元素）时不隐藏提示
+    if (zone && event.relatedTarget && zone.contains(event.relatedTarget as Node)) return
+    dragOver.value = false
+}
+
+function onPlayerError(error: Error) {
+    errorMsg.value = error?.message || t('video.play_failed')
+}
+
+onMounted(() => {
+    // 拖拽由 Go 侧处理（路径本来就在 Go 手里），前端只接收结果
+    offVideoOpened = Events.On(VIDEO_OPENED_EVENT, (event) => {
+        const result = (event.data ?? {}) as { id?: number }
+        if (!result.id) return
+
+        errorMsg.value = ''
+        videoUrl.value = `${API_BASE}/video/${result.id}`
+    })
+
+    offVideoOpenFailed = Events.On(VIDEO_OPEN_FAILED_EVENT, (event) => {
+        const { message } = (event.data ?? {}) as { message?: string }
+        errorMsg.value = message || t('video.error_open_failed')
+    })
+})
+
+onBeforeUnmount(() => {
+    offVideoOpened?.()
+    offVideoOpenFailed?.()
+})
 
 // 进入播放器网页全屏前窗口是否已最大化，用于退出时恢复
 let wasMaximised = false
@@ -148,6 +220,37 @@ async function syncWindowMaximise(state: boolean) {
     align-items: center;
     justify-content: center;
     height: 100%;
+}
+
+/* 系统拖拽进入播放区域时的高亮，类名由 Wails 运行时自动添加 */
+.center.file-drop-target-active {
+    outline: 2px dashed #3b82f6;
+    outline-offset: -6px;
+}
+
+.drop-tip,
+.error-tip {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.drop-tip {
+    top: 16px;
+    color: #fff;
+    background: rgba(59, 130, 246, 0.85);
+}
+
+.error-tip {
+    bottom: 16px;
+    max-width: 80%;
+    color: #fff;
+    background: rgba(220, 38, 38, 0.85);
 }
 
 .player-placeholder {
