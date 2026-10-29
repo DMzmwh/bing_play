@@ -43,12 +43,25 @@
             @drop.prevent="dragOver = false"
         >
             <ArtPlayer
+                v-if="videoUrl"
                 :url="videoUrl"
                 :options="playerOptions"
                 autoplay
                 @fullscreen-web="syncWindowMaximise"
                 @error="onPlayerError"
                 />
+            <!-- 空状态：还没有播放地址时展示拖拽引导 -->
+            <div v-if="!videoUrl && !dragOver" class="empty-state">
+                <svg class="empty-icon" viewBox="0 0 64 64" aria-hidden="true">
+                    <rect x="7" y="13" width="50" height="38" rx="4" />
+                    <circle cx="32" cy="32" r="9.5" />
+                    <path class="film-holes" d="M15 13v7M23 13v7M31 13v7M39 13v7M47 13v7M15 51v-7M23 51v-7M31 51v-7M39 51v-7M47 51v-7" />
+                    <path class="film-line" d="M7 22h50M7 42h50" />
+                    <path class="play-triangle" d="M29.6 27.4l6.8 4.6-6.8 4.6z" />
+                </svg>
+                <div class="empty-title">{{ t('video.empty_title') }}</div>
+                <div class="empty-hint">{{ t('video.empty_hint') }}</div>
+            </div>
             <div v-if="dragOver" class="drop-tip">{{ t('video.drop_tip') }}</div>
             <div v-if="errorMsg" class="error-tip">{{ errorMsg }}</div>
             <!-- 底部控制条 -->
@@ -69,7 +82,8 @@ const VIDEO_OPENED_EVENT = 'video:opened'
 /** 后端打开视频失败的事件名，需与 Go 端保持一致 */
 const VIDEO_OPEN_FAILED_EVENT = 'video:open-failed'
 
-const videoUrl = ref(`${API_BASE}/video/local/11`)
+/** 当前播放地址，为空时不渲染播放器，播放区保持空白 */
+const videoUrl = ref('')
 const dragOver = ref(false)
 const errorMsg = ref('')
 
@@ -238,6 +252,48 @@ async function syncWindowMaximise(state: boolean) {
     font-size: 13px;
     pointer-events: none;
     z-index: 10;
+}
+
+/* 空状态：无播放地址时的拖拽引导 */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    user-select: none;
+}
+
+.empty-icon {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 14px;
+    fill: none;
+    stroke: #33475c;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.empty-icon .film-holes,
+.empty-icon .film-line {
+    stroke: #27394b;
+    stroke-width: 1.4;
+}
+
+.empty-icon .play-triangle {
+    fill: #3b82f6;
+    stroke: none;
+}
+
+.empty-title {
+    font-size: 14px;
+    color: #9fb0c0;
+}
+
+.empty-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #5f7183;
 }
 
 .drop-tip {
