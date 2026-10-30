@@ -210,8 +210,11 @@ tasks:
 
   dev:frontend:
     summary: Runs the frontend in development mode
-    deps:
-      - task: install:frontend:deps
+    # 原依赖（保留备查，需要时可恢复）：
+    # deps:
+    #   - task: install:frontend:deps
+    # 不依赖 install:frontend:deps：build:frontend 已执行过依赖安装，
+    # 这里再跑一次 npm install 会额外消耗约 6 秒，让 Vite 更晚就绪。
     cmds:
       - task: frontend:dev:{{.PACKAGE_MANAGER}}
 

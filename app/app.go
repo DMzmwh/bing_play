@@ -11,6 +11,7 @@ import (
 
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/db"
+	"github.com/bing/bing-play/internal/dhtcrawler"
 	"github.com/bing/bing-play/internal/i18n"
 	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
@@ -51,6 +52,7 @@ func NewApp(assets embed.FS) *App {
 		server.Module,
 		service.Module,
 		torrentmgr.Module,
+		dhtcrawler.Module,
 		// =========================
 		// Wails assets
 		// =========================
@@ -59,6 +61,7 @@ func NewApp(assets embed.FS) *App {
 		fx.Invoke(func(
 			_ *server.Server,
 			_ *torrentmgr.TorrentManager,
+			_ *dhtcrawler.Service,
 		) {
 
 		}),

@@ -5,6 +5,7 @@ import (
 	"github.com/bing/bing-play/internal/db/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ResourceDAO struct {
@@ -71,6 +72,19 @@ func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 		Error
 
 	return list, err
+}
+
+// SaveCrawledResources 批量写入爬虫抓取到的种子资源。
+// 依靠 info_hash 上的唯一索引做去重：已存在的记录直接跳过，避免重复插入。
+func (d *ResourceDAO) SaveCrawledResources(list []*models.Resource) error {
+	if len(list) == 0 {
+		return nil
+	}
+
+	return d.db.
+		Clauses(clause.OnConflict{DoNothing: true}).
+		CreateInBatches(list, 100).
+		Error
 }
 
 // GetByLocalPath 根据本地文件路径查询资源

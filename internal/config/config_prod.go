@@ -24,5 +24,8 @@ func Load() *Config {
 			basePath,
 			"downloads",
 		),
+		ResourceDir:    "resources",
+		CrawlerEnabled: true,
+		CrawlerPort:    51414,
 	}
 }

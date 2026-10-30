@@ -52,10 +52,20 @@ dev_mode:
       - "*.ts" # The frontend directory will be excluded entirely by the setting above.
     git_ignore: true
   executes:
-    - cmd: wails3 build DEV=true
-      type: blocking
+    # 原顺序（保留备查，需要时可恢复）：
+    # - cmd: wails3 build DEV=true
+    #   type: blocking
+    # - cmd: wails3 task common:dev:frontend
+    #   type: background
+    # - cmd: wails3 task run
+    #   type: primary
+    #
+    # Vite 冷启动约 7 秒，而应用端 preRun 只等待约 5 秒（10 次 × 500ms）。
+    # 先把前端 dev server 放到后台启动，让它在下面 blocking 构建期间完成预热。
     - cmd: wails3 task common:dev:frontend
       type: background
+    - cmd: wails3 build DEV=true
+      type: blocking
     - cmd: wails3 task run
       type: primary
 

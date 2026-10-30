@@ -2,6 +2,8 @@
 .idea
 bin
 data/
+# DHT 爬虫运行期落盘数据（从仓库根目录直接启动时生成）
+resources/crawler/
 frontend/dist
 frontend/bindings
 frontend/node_modules

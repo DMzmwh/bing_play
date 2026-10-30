@@ -3,11 +3,13 @@ module github.com/bing/bing-play
 go 1.26.0
 
 require (
-	github.com/anacrolix/dht/v2 v2.23.0
+	github.com/anacrolix/dht/v2 v2.24.0
 	github.com/anacrolix/torrent v1.61.0
+	github.com/bing/bing-dhtcrawler v0.2.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/libtnb/sqlite v1.2.2
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
+	github.com/tylertreat/BoomFilters v0.0.0-20251117164519-53813c36cc1b
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	go.uber.org/fx v1.24.0
 	golang.org/x/sync v0.22.0
@@ -15,6 +17,18 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/gorm v1.31.2
 	modernc.org/sqlite v1.57.0
+)
+
+require (
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/bits-and-blooms/bloom/v3 v3.7.1 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/prometheus/client_golang v1.12.2 // indirect
+	github.com/prometheus/client_model v0.2.0 // indirect
+	github.com/prometheus/common v0.35.0 // indirect
+	github.com/prometheus/procfs v0.7.3 // indirect
+	google.golang.org/protobuf v1.36.10 // indirect
 )
 
 require (
@@ -114,3 +128,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
+
+replace github.com/bing/bing-dhtcrawler => ../bing-dhtcrawler
