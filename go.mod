@@ -6,13 +6,13 @@ require (
 	github.com/anacrolix/dht/v2 v2.23.0
 	github.com/anacrolix/torrent v1.61.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/libtnb/sqlite v1.2.2
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	go.uber.org/fx v1.24.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.41.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 	modernc.org/sqlite v1.57.0
 )

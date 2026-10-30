@@ -2,13 +2,14 @@ package db
 
 import (
 	"database/sql"
-	"github.com/bing/bing-play/internal/config"
-	"github.com/bing/bing-play/internal/logger"
 	"log/slog"
 	"os"
 	"path/filepath"
 
-	"gorm.io/driver/sqlite"
+	"github.com/bing/bing-play/internal/config"
+	"github.com/bing/bing-play/internal/logger"
+
+	"github.com/libtnb/sqlite"
 	"gorm.io/gorm"
 	_ "modernc.org/sqlite"
 )
