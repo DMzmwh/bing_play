@@ -3,9 +3,9 @@ module github.com/bing/bing-play
 go 1.26.0
 
 require (
+	github.com/DMzmwh/bing-dhtcrawler v0.2.1
 	github.com/anacrolix/dht/v2 v2.24.0
 	github.com/anacrolix/torrent v1.61.0
-	github.com/bing/bing-dhtcrawler v0.2.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/libtnb/sqlite v1.2.2
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
@@ -128,5 +128,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
-
-replace github.com/bing/bing-dhtcrawler => ../bing-dhtcrawler

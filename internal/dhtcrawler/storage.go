@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/bing/bing-dhtcrawler/dht"
-	"github.com/bing/bing-dhtcrawler/storage"
+	"github.com/DMzmwh/bing-dhtcrawler/dht"
+	"github.com/DMzmwh/bing-dhtcrawler/storage"
 )
 
 // 爬虫数据在 resources 下的相对目录。

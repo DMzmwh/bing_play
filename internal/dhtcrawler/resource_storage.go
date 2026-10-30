@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/bing/bing-dhtcrawler/dht"
-	"github.com/bing/bing-dhtcrawler/storage"
+	"github.com/DMzmwh/bing-dhtcrawler/dht"
+	"github.com/DMzmwh/bing-dhtcrawler/storage"
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
 )
