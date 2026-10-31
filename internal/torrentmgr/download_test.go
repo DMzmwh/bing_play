@@ -146,13 +146,13 @@ func TestEstimateSeconds(t *testing.T) {
 }
 
 func TestStatusRank(t *testing.T) {
-	if statusRank("downloading") != 0 {
+	if taskStateRank("downloading") != 0 {
 		t.Fatalf("下载中应排最前")
 	}
-	if statusRank("failed") >= statusRank("completed") {
+	if taskStateRank("failed") >= taskStateRank("completed") {
 		t.Fatalf("已完成任务应排在失败任务之后")
 	}
-	if statusRank("cancelled") <= statusRank("failed") {
+	if taskStateRank("cancelled") <= taskStateRank("failed") {
 		t.Fatalf("取消任务应排在最后")
 	}
 }
@@ -249,31 +249,35 @@ func TestVOFromResource(t *testing.T) {
 	total := int64(1000)
 	downloaded := int64(400)
 	priority := 7
-	retries := 2
-	errKey := ErrKeyNetwork
 	created := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
-	completed := created.Add(time.Hour)
+	verified := created.Add(time.Hour)
 	resource := &models.Resource{
 		InfoHash:       "hash-1",
 		ResourceName:   &name,
 		FileName:       &fileName,
 		TotalSize:      &total,
 		DownloadedSize: &downloaded,
-		DownloadStatus: models.JobStatusPaused,
+		Kind:           models.KindTorrent,
+		TaskState:      models.TaskPaused,
+		LocalState:     models.LocalPartial,
 		LocalPath:      "/downloads",
 		Priority:       &priority,
-		RetryCount:     &retries,
-		ErrorMessage:   &errKey,
+		Attempt:        2,
+		MaxAttempts:    3,
+		ErrorCode:      ErrKeyNetwork,
 		CreateTime:     &created,
-		CompletedTime:  &completed,
+		VerifiedAt:     &verified,
 	}
 
 	payload := voFromResource(resource)
 	if payload.InfoHash != "hash-1" || payload.Name != name || payload.FileName != fileName {
 		t.Fatalf("基础字段转换错误: %+v", payload)
 	}
-	if payload.Status != models.JobStatusPaused || payload.Priority != priority || payload.RetryCount != retries {
+	if payload.TaskState != "paused" || payload.LocalState != "partial" || payload.DisplayState != "paused" {
 		t.Fatalf("状态字段转换错误: %+v", payload)
+	}
+	if payload.Priority != priority || payload.Attempt != 2 || payload.MaxAttempts != 3 || payload.ErrorCode != ErrKeyNetwork {
+		t.Fatalf("控制字段转换错误: %+v", payload)
 	}
 	if payload.TotalSize != total || payload.Downloaded != downloaded {
 		t.Fatalf("体积字段转换错误: %+v", payload)
@@ -284,15 +288,19 @@ func TestVOFromResource(t *testing.T) {
 	if payload.EtaSeconds != -1 {
 		t.Fatalf("EtaSeconds = %d, want -1", payload.EtaSeconds)
 	}
-	if payload.CreatedTime != created.Format(time.DateTime) || payload.CompletedTime != completed.Format(time.DateTime) {
+	if payload.CreatedTime != created.Format(time.DateTime) || payload.VerifiedAt != verified.Format(time.DateTime) {
 		t.Fatalf("时间格式转换错误: %+v", payload)
 	}
 
 	// 已完成任务应固定为 100%
 	done := *resource
-	done.DownloadStatus = models.JobStatusCompleted
+	done.TaskState = models.TaskCompleted
+	done.LocalState = models.LocalPresent
 	donePayload := voFromResource(&done)
 	if donePayload.Progress != 100 || donePayload.EtaSeconds != 0 {
 		t.Fatalf("已完成任务进度 = %v, eta = %d", donePayload.Progress, donePayload.EtaSeconds)
+	}
+	if donePayload.DisplayState != "completed" {
+		t.Fatalf("已完成任务展示态 = %q, want completed", donePayload.DisplayState)
 	}
 }

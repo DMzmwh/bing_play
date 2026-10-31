@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/DMzmwh/bing-dhtcrawler v0.2.1
 	github.com/anacrolix/dht/v2 v2.24.0
+	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/torrent v1.61.1-0.20261024051421-5f95cd33fd29
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/libtnb/sqlite v1.2.2
@@ -38,7 +39,6 @@ require (
 	github.com/anacrolix/btree v0.1.1 // indirect
 	github.com/anacrolix/chansync v0.8.0 // indirect
 	github.com/anacrolix/envpprof v1.4.0 // indirect
-	github.com/anacrolix/generics v0.2.0 // indirect
 	github.com/anacrolix/go-libutp v1.5.2-0.20260908013213-836dd42cdde6 // indirect
 	github.com/anacrolix/go-utp v0.0.0-20260908033909-9f1664acf866 // indirect
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb // indirect

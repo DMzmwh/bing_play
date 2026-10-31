@@ -114,6 +114,11 @@ func (s *TorrentService) Retry(infoHash string) error {
 	return s.translateError(s.manager.RetryJob(infoHash))
 }
 
+// Repair 修复本地文件丢失的已完成任务，重新下载缺失文件。
+func (s *TorrentService) Repair(infoHash string) error {
+	return s.translateError(s.manager.RepairJob(infoHash))
+}
+
 // Cancel 取消下载任务，数据库记录保留用于列表展示。
 func (s *TorrentService) Cancel(infoHash string) error {
 	return s.translateError(s.manager.CancelJob(infoHash))

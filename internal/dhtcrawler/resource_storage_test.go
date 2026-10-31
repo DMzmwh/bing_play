@@ -36,11 +36,14 @@ func TestToResource(t *testing.T) {
 	if got.SourceURL == nil || *got.SourceURL != wantSource {
 		t.Fatalf("SourceURL = %v, want %q", got.SourceURL, wantSource)
 	}
-	if got.LocalStatus != models.LocalStatusNotDownloaded {
-		t.Fatalf("LocalStatus = %q, want %q", got.LocalStatus, models.LocalStatusNotDownloaded)
+	if got.Kind != models.KindTorrent {
+		t.Fatalf("Kind = %v, want %v", got.Kind, models.KindTorrent)
 	}
-	if got.DownloadStatus != models.JobStatus0 {
-		t.Fatalf("DownloadStatus = %q, want %q", got.DownloadStatus, models.JobStatus0)
+	if got.TaskState != models.TaskDiscovered {
+		t.Fatalf("TaskState = %v, want %v", got.TaskState, models.TaskDiscovered)
+	}
+	if got.LocalState != models.LocalNone {
+		t.Fatalf("LocalState = %v, want %v", got.LocalState, models.LocalNone)
 	}
 	if got.CreateTime == nil || !got.CreateTime.Equal(discovered) {
 		t.Fatalf("CreateTime = %v, want %v", got.CreateTime, discovered)

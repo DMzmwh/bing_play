@@ -137,31 +137,29 @@ function formatSize(bytes: number): string {
     return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
-/** 状态文案：优先取本地状态，其次取下载状态，都没有时显示未知 */
+/** 状态文案：直接使用后端派生的展示态，缺失时显示未知 */
 function statusLabel(item: CrawledResourceItem): string {
-    const keys = [item.localStatus, item.downloadStatus].filter(Boolean)
-    for (const key of keys) {
-        const text = t(`resources.status.${key}`)
-        if (text !== `resources.status.${key}`) return text
-    }
-
-    return t('resources.status.unknown')
+    const key = `resources.status.${item.displayState || 'unknown'}`
+    const text = t(key)
+    return text !== key ? text : t('resources.status.unknown')
 }
 
-/** 状态标签颜色，按状态语义区分 */
+/** 状态标签颜色，按展示态语义区分 */
 function statusType(item: CrawledResourceItem): 'success' | 'info' | 'warning' | 'error' | 'default' {
-    const status = item.localStatus === 'not_downloaded' ? item.downloadStatus : item.localStatus
-    switch (status) {
-        case 'exists':
+    switch (item.displayState) {
         case 'completed':
+        case 'local_ready':
             return 'success'
         case 'downloading':
+        case 'fetching_meta':
         case 'queued':
-        case 'download_meta_info':
+        case 'verifying':
+        case 'retrying':
             return 'info'
         case 'paused':
-        case 'missing':
+        case 'file_lost':
         case 'corrupted':
+        case 'local_lost':
             return 'warning'
         case 'failed':
             return 'error'

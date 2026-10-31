@@ -95,8 +95,11 @@ func toResource(record storage.TorrentRecord) *models.Resource {
 		InfoHash:       record.InfoHash,
 		SourceURL:      &sourceURL,
 		TotalSize:      &size,
-		LocalStatus:    models.LocalStatusNotDownloaded,
-		DownloadStatus: models.JobStatus0,
+		Kind:           models.KindTorrent,
+		TaskState:      models.TaskDiscovered,
+		LocalState:     models.LocalNone,
+		MaxAttempts:    3,
+		StateChangedAt: &discoveredAt,
 		CreateTime:     &discoveredAt,
 		UpdateTime:     &discoveredAt,
 	}

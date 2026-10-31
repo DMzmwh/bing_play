@@ -8,14 +8,15 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// 下载任务状态（models.JobStatus）流转说明：
+// 下载任务状态机（models.TaskState）流转说明：
 //
-//	download_meta_info -> queued -> downloading -> completed
-//	                        ^          |
-//	                        |          +-> paused -> queued（继续）
-//	                        |          +-> failed（重试次数耗尽后）
-//	                        +<---------+ stalled（自动重试时重新入队）
-//	任意状态 -> cancelled（用户取消，任务保留在数据库中）
+//	discovered -> preparing -> queued -> downloading -> verifying -> completed
+//	                 |           ^          |
+//	                 |           |          +-> paused -> queued（继续）
+//	                 |           |          +-> retry_wait（自动重试）-> preparing
+//	                 |           |          +-> failed（重试次数耗尽后）
+//	                 +-> failed（来源不可解析 / 元信息拉取失败耗尽重试）
+//	任意活跃状态 -> cancelled（用户取消，任务保留在数据库中）
 //
 // 事件说明：
 //   - EventDownloadProgress：下载中每秒推送一次任务进度、速度与剩余时间。
@@ -42,6 +43,16 @@ const (
 	ErrKeyNoSpace         = "download.error.no_space"
 	ErrKeyResourceGone    = "download.error.resource_gone"
 	ErrKeyNetwork         = "download.error.network"
+	// ErrKeyIntegrity 下载完成后的落盘校验未通过。
+	ErrKeyIntegrity = "download.error.integrity"
+	// ErrKeyCancelTooLate 已完成校验，无法再取消。
+	ErrKeyCancelTooLate = "download.error.cancel_too_late"
+	// ErrKeyInvalidTransition 当前状态不允许执行该操作。
+	ErrKeyInvalidTransition = "download.error.invalid_transition"
+	// ErrKeyRepairNotNeeded 本地文件完好，无需修复。
+	ErrKeyRepairNotNeeded = "download.error.repair_not_needed"
+	// ErrKeyDeleteNotAllowed 当前状态不允许删除本地文件。
+	ErrKeyDeleteNotAllowed = "download.error.delete_not_allowed"
 )
 
 // DownloadConfig 下载模块运行参数，集中定义便于后续扩展为设置项。

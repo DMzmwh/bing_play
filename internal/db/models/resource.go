@@ -1,12 +1,20 @@
 package models
 
 import (
-	"github.com/bing/bing-play/internal/filetype"
 	"time"
+
+	"github.com/bing/bing-play/internal/filetype"
 )
 
 // Resource 资源实体。
 // 用于保存资源、Torrent、本地文件、下载任务以及播放相关信息。
+//
+// 状态采用双轴模型：
+//   - TaskState 下载任务生命周期
+//   - LocalState 本地文件可用性
+//   - LocalLossReason 本地文件丢失 / 损坏的成因
+//
+// 两轴组合由 ValidPair 校验，前端展示态由 DisplayOf 派生，不落库。
 type Resource struct {
 
 	// =========================================================
@@ -61,36 +69,48 @@ type Resource struct {
 	// MimeType 文件 MIME 类型，例如 video/mp4、video/x-matroska。
 	MimeType *string `gorm:"column:mime_type"`
 
-	// ResourceType 文件  类型，例如video
+	// ResourceType 文件类型，例如 video。
 	ResourceType filetype.Category `gorm:"column:resource_type"`
 
 	// =========================================================
-	// 本地文件状态
+	// 状态机
 	// =========================================================
 
-	// LocalStatus 本地文件状态。
-	//
-	// not_downloaded：尚未下载
-	// exists：文件存在且正常
-	// missing：数据库记录存在，但本地文件不存在
-	// corrupted：本地文件存在，但文件损坏
-	// deleted：用户主动删除了本地文件
-	LocalStatus LocalStatus `gorm:"column:local_status;type:text"`
+	// Kind 资源来源类型，决定是否参与下载状态机与是否进入下载列表。
+	Kind Kind `gorm:"column:kind;default:0"`
 
-	// =========================================================
-	// 下载状态
-	// =========================================================
+	// TaskState 下载任务生命周期状态。
+	TaskState TaskState `gorm:"column:task_state;default:0"`
 
-	// DownloadStatus 下载任务状态。
-	//
-	// fetching_meta_info：正在获取 Torrent 元信息
-	// queued：等待下载
-	// downloading：下载中
-	// paused：已暂停
-	// completed：下载完成
-	// failed：下载失败
-	// cancelled：已取消
-	DownloadStatus JobStatus `gorm:"column:download_status;type:text"`
+	// LocalState 本地文件可用性状态。
+	LocalState LocalState `gorm:"column:local_state;default:0"`
+
+	// LocalLossReason 本地文件缺失 / 损坏的成因。
+	LocalLossReason LocalLossReason `gorm:"column:local_loss_reason;default:0"`
+
+	// StateVersion 每次成功流转 +1，用于并发 CAS 落库。
+	StateVersion uint64 `gorm:"column:state_version;default:0"`
+
+	// Attempt 当前连续失败次数。
+	Attempt uint16 `gorm:"column:attempt;default:0"`
+
+	// MaxAttempts 创建时快照的自动重试上限。
+	MaxAttempts uint16 `gorm:"column:max_attempts;default:3"`
+
+	// ErrorCode 最近一次失败原因的 i18n key，成功时为空。
+	ErrorCode string `gorm:"column:error_code;default:''"`
+
+	// NextRetryAt 下一次自动重试时间点，非 RetryWait 状态时为 nil。
+	NextRetryAt *time.Time `gorm:"column:next_retry_at"`
+
+	// StateChangedAt 最后一次状态变更时间。
+	StateChangedAt *time.Time `gorm:"column:state_changed_at"`
+
+	// VerifiedAt 最近一次校验通过时间。
+	VerifiedAt *time.Time `gorm:"column:verified_at"`
+
+	// LocalCheckedAt 最近一次本地文件检查时间。
+	LocalCheckedAt *time.Time `gorm:"column:local_checked_at"`
 
 	// =========================================================
 	// 下载控制
@@ -99,15 +119,6 @@ type Resource struct {
 	// Priority 下载优先级。
 	// 数值越大，优先级越高。
 	Priority *int `gorm:"default:0"`
-
-	// RetryCount 当前任务已经自动重试的次数。
-	RetryCount *int `gorm:"default:0"`
-
-	// MateRetryCount 最大自动重试次数。
-	MateRetryCount *int `gorm:"default:0"`
-
-	// ErrorMessage 最近一次下载失败的错误信息。
-	ErrorMessage *string `gorm:"column:error_message"`
 
 	// =========================================================
 	// 播放信息
@@ -163,8 +174,12 @@ type Resource struct {
 
 	// UpdateTime 资源最后更新时间。
 	UpdateTime *time.Time `gorm:"column:update_time;default:CURRENT_TIMESTAMP"`
+}
 
-	// CompletedTime 下载完成时间。
-	// 未完成时为 nil。
-	CompletedTime *time.Time `gorm:"column:completed_time"`
+// DisplayState 返回前端展示态，O(1)。
+func (r *Resource) Display() DisplayState {
+	if r == nil {
+		return ShowFailed
+	}
+	return DisplayOf(r.Kind, r.TaskState, r.LocalState)
 }

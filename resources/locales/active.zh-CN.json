@@ -210,27 +210,11 @@
     "description": "种子资源列表 - 加载失败提示",
     "other": "加载资源列表失败"
   },
-  "resources.status.not_downloaded": {
+  "resources.status.undownloaded": {
     "description": "种子资源列表 - 状态：未下载",
     "other": "未下载"
   },
-  "resources.status.exists": {
-    "description": "种子资源列表 - 状态：本地已存在",
-    "other": "本地已存在"
-  },
-  "resources.status.missing": {
-    "description": "种子资源列表 - 状态：本地文件丢失",
-    "other": "文件丢失"
-  },
-  "resources.status.corrupted": {
-    "description": "种子资源列表 - 状态：文件损坏",
-    "other": "文件损坏"
-  },
-  "resources.status.deleted": {
-    "description": "种子资源列表 - 状态：文件已删除",
-    "other": "文件已删除"
-  },
-  "resources.status.download_meta_info": {
+  "resources.status.fetching_meta": {
     "description": "种子资源列表 - 状态：获取元信息中",
     "other": "获取元信息"
   },
@@ -246,6 +230,14 @@
     "description": "种子资源列表 - 状态：已暂停",
     "other": "已暂停"
   },
+  "resources.status.verifying": {
+    "description": "种子资源列表 - 状态：校验中",
+    "other": "校验中"
+  },
+  "resources.status.retrying": {
+    "description": "种子资源列表 - 状态：等待重试",
+    "other": "等待重试"
+  },
   "resources.status.completed": {
     "description": "种子资源列表 - 状态：已完成",
     "other": "已完成"
@@ -257,6 +249,22 @@
   "resources.status.cancelled": {
     "description": "种子资源列表 - 状态：已取消",
     "other": "已取消"
+  },
+  "resources.status.file_lost": {
+    "description": "种子资源列表 - 状态：文件丢失",
+    "other": "文件丢失"
+  },
+  "resources.status.corrupted": {
+    "description": "种子资源列表 - 状态：文件损坏",
+    "other": "文件损坏"
+  },
+  "resources.status.local_ready": {
+    "description": "种子资源列表 - 状态：本地可用",
+    "other": "本地可用"
+  },
+  "resources.status.local_lost": {
+    "description": "种子资源列表 - 状态：本地文件丢失",
+    "other": "本地文件丢失"
   },
   "resources.status.unknown": {
     "description": "种子资源列表 - 状态：未知",
@@ -400,6 +408,10 @@
     "description": "下载中心 - 按钮：取消",
     "other": "取消任务"
   },
+  "download.action.repair": {
+    "description": "下载中心 - 按钮：修复文件丢失",
+    "other": "修复"
+  },
   "download.action.priority_up": {
     "description": "下载中心 - 按钮：提高优先级",
     "other": "提高优先级"
@@ -459,6 +471,26 @@
   "download.error.network": {
     "description": "下载错误 - 网络异常",
     "other": "网络连接异常，正在自动重试"
+  },
+  "download.error.integrity": {
+    "description": "下载错误 - 文件校验失败",
+    "other": "文件校验失败，将重新下载"
+  },
+  "download.error.cancel_too_late": {
+    "description": "下载错误 - 校验阶段无法取消",
+    "other": "任务正在校验中，暂时无法取消"
+  },
+  "download.error.invalid_transition": {
+    "description": "下载错误 - 当前状态不支持该操作",
+    "other": "当前状态不支持该操作"
+  },
+  "download.error.repair_not_needed": {
+    "description": "下载错误 - 无需修复",
+    "other": "该任务已完成，无需修复"
+  },
+  "download.error.delete_not_allowed": {
+    "description": "下载错误 - 不允许删除",
+    "other": "当前状态不允许删除"
   },
 
   "settings.title": {

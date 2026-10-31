@@ -3,6 +3,7 @@ package dao
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/bing/bing-play/internal/db/models"
 
@@ -39,6 +40,59 @@ func (d *ResourceDAO) SaveLocalResource(r *models.Resource) error {
 	return d.db.Omit("info_hash").Save(r).Error
 }
 
+// UpdateState 以 CAS 方式写回状态与进度快照。
+//
+// fromVersion 为本次写入前数据库中期望的 state_version。
+// 返回 false 表示版本已变化（存在更新的写入），本次陈旧快照被丢弃。
+func (d *ResourceDAO) UpdateState(r *models.Resource, fromVersion uint64) (bool, error) {
+	if r == nil || r.ID == 0 {
+		return false, nil
+	}
+
+	result := d.db.Model(&models.Resource{}).
+		Where("id = ? AND state_version = ?", r.ID, fromVersion).
+		Updates(map[string]any{
+			"task_state":        int8(r.TaskState),
+			"local_state":       int8(r.LocalState),
+			"local_loss_reason": int8(r.LocalLossReason),
+			"state_version":     r.StateVersion,
+			"attempt":           r.Attempt,
+			"max_attempts":      r.MaxAttempts,
+			"error_code":        r.ErrorCode,
+			"next_retry_at":     r.NextRetryAt,
+			"state_changed_at":  r.StateChangedAt,
+			"verified_at":       r.VerifiedAt,
+			"local_checked_at":  r.LocalCheckedAt,
+			"downloaded_size":   r.DownloadedSize,
+			"file_size":         r.FileSize,
+			"total_size":        r.TotalSize,
+			"resource_name":     r.ResourceName,
+			"file_name":         r.FileName,
+			"local_path":        r.LocalPath,
+			"resource_type":     r.ResourceType,
+			"update_time":       r.UpdateTime,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+// UpdatePriority 仅更新优先级，不改变状态版本。
+func (d *ResourceDAO) UpdatePriority(id int64, priority int) error {
+	if id == 0 {
+		return nil
+	}
+	now := time.Now()
+	return d.db.Model(&models.Resource{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"priority":    priority,
+			"update_time": &now,
+		}).
+		Error
+}
+
 // GetByInfoHash 根据 InfoHash 查询资源，不存在时返回 nil。
 func (d *ResourceDAO) GetByInfoHash(infoHash string) (*models.Resource, error) {
 	if infoHash == "" {
@@ -67,36 +121,61 @@ func (d *ResourceDAO) GetByIDs(ids []int64) ([]models.Resource, error) {
 	return list, err
 }
 
-// downloadTaskStatuses 下载页需要展示的任务状态，原始记录（0）与本地视频不在其中。
-var downloadTaskStatuses = []models.JobStatus{
-	models.JobStatusDownloadMetaInfo,
-	models.JobStatusQueued,
-	models.JobStatusDownloading,
-	models.JobStatusPaused,
-	models.JobStatusCompleted,
-	models.JobStatusFailed,
-	models.JobStatusCancelled,
+// downloadTaskStates 下载页需要展示的任务状态，Discovered（仅爬虫发现）与本地视频不在其中。
+var downloadTaskStates = []models.TaskState{
+	models.TaskPreparing,
+	models.TaskQueued,
+	models.TaskDownloading,
+	models.TaskPaused,
+	models.TaskVerifying,
+	models.TaskRetryWait,
+	models.TaskCompleted,
+	models.TaskFailed,
+	models.TaskCancelled,
 }
 
-// ListDownloadTasks 查询全部下载任务，按更新时间倒序。
+// int8Slice 把强类型状态枚举转成驱动可直接绑定的切片。
+func int8Slice[T ~int8](values []T) []int8 {
+	out := make([]int8, len(values))
+	for i, v := range values {
+		out[i] = int8(v)
+	}
+	return out
+}
+
+// ListDownloadTasks 查询全部种子下载任务（排除本地视频与纯爬虫记录），按更新时间倒序。
 func (d *ResourceDAO) ListDownloadTasks() ([]models.Resource, error) {
 	var list []models.Resource
 	err := d.db.
-		Where("download_status IN ?", downloadTaskStatuses).
+		Where("kind = ? AND task_state IN ?", int8(models.KindTorrent), int8Slice(downloadTaskStates)).
 		Order("update_time DESC").
 		Find(&list).
 		Error
 	return list, err
 }
 
-// ListByDownloadStatuses 按下载状态查询资源，供启动时恢复未完成任务。
-func (d *ResourceDAO) ListByDownloadStatuses(statuses []models.JobStatus) ([]models.Resource, error) {
-	if len(statuses) == 0 {
+// ListCompletedTasks 查询已完成的种子下载任务，用于下载页"已完成"标签页。
+func (d *ResourceDAO) ListCompletedTasks() ([]models.Resource, error) {
+	var list []models.Resource
+	err := d.db.
+		Where("kind = ? AND task_state = ?", int8(models.KindTorrent), int8(models.TaskCompleted)).
+		Order("verified_at DESC").
+		Find(&list).
+		Error
+	return list, err
+}
+
+// ListByTaskStates 按任务状态查询资源，供启动时恢复未完成任务。
+func (d *ResourceDAO) ListByTaskStates(states []models.TaskState) ([]models.Resource, error) {
+	if len(states) == 0 {
 		return nil, nil
 	}
 
 	var list []models.Resource
-	err := d.db.Where("download_status IN ?", statuses).Find(&list).Error
+	err := d.db.
+		Where("kind = ? AND task_state IN ?", int8(models.KindTorrent), int8Slice(states)).
+		Find(&list).
+		Error
 	return list, err
 }
 
@@ -125,10 +204,20 @@ func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 }
 
 // ListPlayable 查询播放列表所需的本地资源，按资源名称、创建时间排序。
+//
+// 只返回"本地文件齐全"的记录：
+//   - 本地视频：KindLocal + LocalPresent
+//   - 种子资源：KindTorrent + TaskCompleted + LocalPresent
 func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 	var list []models.Resource
 
 	err := d.db.
+		Where(
+			"local_state = ? AND (kind = ? OR task_state = ?)",
+			int8(models.LocalPresent),
+			int8(models.KindLocal),
+			int8(models.TaskCompleted),
+		).
 		Where("local_path <> ''").
 		Order("resource_name ASC, create_time ASC").
 		Find(&list).

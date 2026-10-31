@@ -97,6 +97,7 @@ import {
     ListActive,
     ListCompleted,
     Pause,
+    Repair,
     Resume,
     Retry,
     SetPriority
@@ -110,8 +111,21 @@ const STATE_EVENT = 'download:state-changed'
 /** 事件之外的低频兜底刷新间隔，防止事件漏推导致列表滞后 */
 const FALLBACK_REFRESH_MS = 5000
 
-/** 无法估算剩余时间的状态 */
-const INACTIVE_STATUSES = new Set(['download_meta_info', 'queued', 'paused', 'failed', 'cancelled'])
+/** 无法估算剩余时间的展示态 */
+const INACTIVE_DISPLAY = new Set([
+    'undownloaded',
+    'fetching_meta',
+    'queued',
+    'paused',
+    'verifying',
+    'retrying',
+    'failed',
+    'cancelled',
+    'file_lost',
+    'corrupted',
+    'local_ready',
+    'local_lost'
+])
 
 /** 下载中的任务：仅来自后端内存，包含获取元信息、排队、下载、暂停、失败与已取消 */
 const activeJobs = ref<TorrentJobVO[]>([])
@@ -125,31 +139,35 @@ const tab = ref<'active' | 'completed'>('active')
 
 const message = useMessage()
 
-/** 列表排序权重，与后端 statusRank 保持一致：进行中的任务靠前 */
-function statusRank(status: string): number {
-    switch (status) {
+/** 列表排序权重，与后端 taskStateRank 保持一致：进行中的任务靠前 */
+function statusRank(state: string): number {
+    switch (state) {
         case 'downloading':
             return 0
-        case 'download_meta_info':
+        case 'verifying':
             return 1
-        case 'queued':
+        case 'preparing':
             return 2
-        case 'paused':
+        case 'queued':
             return 3
-        case 'failed':
+        case 'retry_wait':
             return 4
-        case 'completed':
+        case 'paused':
             return 5
-        case 'cancelled':
+        case 'failed':
             return 6
-        default:
+        case 'completed':
             return 7
+        case 'cancelled':
+            return 8
+        default:
+            return 9
     }
 }
 
 /** 任务排序比较器：状态权重 → 优先级 → 创建时间 */
 function compareJobs(left: TorrentJobVO, right: TorrentJobVO): number {
-    const rankDiff = statusRank(left.status) - statusRank(right.status)
+    const rankDiff = statusRank(left.taskState) - statusRank(right.taskState)
     if (rankDiff !== 0) return rankDiff
     if (left.priority !== right.priority) return right.priority - left.priority
     return right.createdTime.localeCompare(left.createdTime)
@@ -161,7 +179,9 @@ function isSameJob(left: TorrentJobVO, right: TorrentJobVO): boolean {
         left.infoHash === right.infoHash &&
         left.name === right.name &&
         left.fileName === right.fileName &&
-        left.status === right.status &&
+        left.taskState === right.taskState &&
+        left.localState === right.localState &&
+        left.displayState === right.displayState &&
         left.progress === right.progress &&
         left.downloaded === right.downloaded &&
         left.totalSize === right.totalSize &&
@@ -170,10 +190,12 @@ function isSameJob(left: TorrentJobVO, right: TorrentJobVO): boolean {
         left.peers === right.peers &&
         left.etaSeconds === right.etaSeconds &&
         left.priority === right.priority &&
-        left.retryCount === right.retryCount &&
-        left.errorMessage === right.errorMessage &&
+        left.attempt === right.attempt &&
+        left.maxAttempts === right.maxAttempts &&
+        left.errorCode === right.errorCode &&
+        left.nextRetryAt === right.nextRetryAt &&
         left.savePath === right.savePath &&
-        left.completedTime === right.completedTime
+        left.verifiedAt === right.verifiedAt
     )
 }
 
@@ -234,13 +256,18 @@ function upsertCompleted(payload: TorrentJobVO) {
 function upsert(payload: TorrentJobVO | null | undefined) {
     if (!payload?.infoHash) return
 
-    if (payload.status === 'completed') {
+    if (payload.taskState === 'completed') {
         const index = activeJobs.value.findIndex((job) => job.infoHash === payload.infoHash)
         if (index >= 0) activeJobs.value.splice(index, 1)
         upsertCompleted(payload)
         return
     }
 
+    // 已完成任务重新进入下载流程（如修复文件丢失）时，从已完成列表移除
+    const completedIndex = completedJobs.value.findIndex(
+        (job) => job.infoHash === payload.infoHash
+    )
+    if (completedIndex >= 0) completedJobs.value.splice(completedIndex, 1)
     upsertActive(payload)
 }
 
@@ -253,15 +280,15 @@ async function loadActive(showLoading = false) {
     
     if (showLoading) loading.value = true
 
-    const previousStatuses = new Map(activeJobs.value.map((job) => [job.infoHash, job.status]))
+    const previousStates = new Map(activeJobs.value.map((job) => [job.infoHash, job.taskState]))
     try {
         applyActiveRows((await ListActive()) ?? [])
         if (loadError.value) loadError.value = false
 
         // 兜底：任务离开下载中列表且不是手动取消，说明已完成但事件可能漏推，补一次已完成查询
         const stillActive = new Set(activeJobs.value.map((job) => job.infoHash))
-        const completedMissed = Array.from(previousStatuses.entries()).some(
-            ([infoHash, status]) => !stillActive.has(infoHash) && status !== 'cancelled'
+        const completedMissed = Array.from(previousStates.entries()).some(
+            ([infoHash, state]) => !stillActive.has(infoHash) && state !== 'cancelled'
         )
         if (completedMissed) void loadCompleted()
     } catch (error) {
@@ -334,8 +361,8 @@ function formatSpeed(bytes: number | null | undefined): string {
 
 /** 剩余时间，按秒 / 分 / 小时分段展示 */
 function formatEta(job: TorrentJobVO): string {
-    if (job.status === 'completed') return '-'
-    if (INACTIVE_STATUSES.has(job.status) || job.etaSeconds < 0) {
+    if (job.taskState === 'completed') return '-'
+    if (INACTIVE_DISPLAY.has(job.displayState) || job.etaSeconds < 0) {
         return t('download.eta_unknown')
     }
 
@@ -353,22 +380,29 @@ function formatEta(job: TorrentJobVO): string {
     })
 }
 
-/** 状态文案复用种子资源列表的状态 key */
+/** 状态文案复用种子资源列表的状态 key，直接使用后端派生的展示态 */
 function statusLabel(job: TorrentJobVO): string {
-    const text = t(`resources.status.${job.status}`)
-    return text !== `resources.status.${job.status}` ? text : t('resources.status.unknown')
+    const key = `resources.status.${job.displayState || 'unknown'}`
+    const text = t(key)
+    return text !== key ? text : t('resources.status.unknown')
 }
 
 /** 状态标签颜色 */
 function statusType(job: TorrentJobVO): 'success' | 'info' | 'warning' | 'error' | 'default' {
-    switch (job.status) {
+    switch (job.displayState) {
         case 'completed':
+        case 'local_ready':
             return 'success'
         case 'downloading':
-        case 'download_meta_info':
+        case 'fetching_meta':
         case 'queued':
+        case 'verifying':
+        case 'retrying':
             return 'info'
         case 'paused':
+        case 'file_lost':
+        case 'corrupted':
+        case 'local_lost':
             return 'warning'
         case 'failed':
             return 'error'
@@ -379,17 +413,27 @@ function statusType(job: TorrentJobVO): 'success' | 'info' | 'warning' | 'error'
 
 /** 是否处于活跃状态，可暂停 */
 function isActive(job: TorrentJobVO): boolean {
-    return job.status === 'download_meta_info' || job.status === 'queued' || job.status === 'downloading'
+    return (
+        job.taskState === 'preparing' ||
+        job.taskState === 'queued' ||
+        job.taskState === 'downloading' ||
+        job.taskState === 'retry_wait'
+    )
 }
 
 /** 是否可继续（暂停后） */
 function canResume(job: TorrentJobVO): boolean {
-    return job.status === 'paused'
+    return job.taskState === 'paused'
 }
 
 /** 是否可重试 */
 function canRetry(job: TorrentJobVO): boolean {
-    return job.status === 'failed' || job.status === 'cancelled'
+    return job.taskState === 'failed' || job.taskState === 'cancelled'
+}
+
+/** 是否可修复：已完成但本地文件丢失 */
+function canRepair(job: TorrentJobVO): boolean {
+    return job.taskState === 'completed' && job.displayState === 'file_lost'
 }
 
 function rowKey(row: TorrentJobVO) {
@@ -430,15 +474,15 @@ const activeColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
                     { size: 'small', bordered: false, type: statusType(row) },
                     { default: () => statusLabel(row) }
                 ),
-                row.retryCount > 0
+                row.attempt > 0
                     ? h(
                           'span',
                           { class: 'retry' },
-                          t('download.retry_count', { Count: row.retryCount })
+                          t('download.retry_count', { Count: row.attempt })
                       )
                     : null,
-                row.errorMessage
-                    ? h('span', { class: 'error-text', title: t(row.errorMessage) }, t(row.errorMessage))
+                row.errorCode
+                    ? h('span', { class: 'error-text', title: t(row.errorCode) }, t(row.errorCode))
                     : null
             ])
     },
@@ -453,7 +497,12 @@ const activeColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
                     percentage: Math.min(100, Math.max(0, row.progress)),
                     height: 6,
                     showIndicator: false,
-                    status: row.status === 'failed' ? 'error' : 'default'
+                    status:
+                        row.displayState === 'failed' ||
+                        row.displayState === 'file_lost' ||
+                        row.displayState === 'corrupted'
+                            ? 'error'
+                            : 'default'
                 }),
                 h('span', { class: 'percent' }, `${row.progress.toFixed(1)}%`)
             ])
@@ -541,10 +590,22 @@ const completedColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
         render: (row) => formatSize(row.totalSize || row.downloaded)
     },
     {
-        key: 'completedTime',
+        key: 'verifiedAt',
         title: t('download.completed_time_label'),
         width: 170,
-        render: (row) => row.completedTime || '-'
+        render: (row) => row.verifiedAt || '-'
+    },
+    {
+        key: 'actions',
+        title: t('download.actions_label'),
+        width: 100,
+        fixed: 'right',
+        render: (row) =>
+            canRepair(row)
+                ? textButton(t('download.action.repair'), () =>
+                      void runAction(() => Repair(row.infoHash))
+                  )
+                : null
     }
 ])
 

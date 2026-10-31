@@ -41,12 +41,19 @@ CREATE TABLE resources (
     downloaded_size INTEGER DEFAULT 0,
     mime_type       TEXT,
     resource_type   TEXT,
-    local_status    TEXT DEFAULT 'not_downloaded',
-    download_status TEXT DEFAULT 'queued',
+    kind            INTEGER DEFAULT 0,
+    task_state      INTEGER DEFAULT 0,
+    local_state     INTEGER DEFAULT 0,
+    local_loss_reason INTEGER DEFAULT 0,
+    state_version   INTEGER DEFAULT 0,
+    attempt         INTEGER DEFAULT 0,
+    max_attempts    INTEGER DEFAULT 3,
+    error_code      TEXT DEFAULT '',
+    next_retry_at   DATETIME,
+    state_changed_at DATETIME,
+    verified_at     DATETIME,
+    local_checked_at DATETIME,
     priority        INTEGER DEFAULT 0,
-    retry_count     INTEGER DEFAULT 0,
-    mate_retry_count INTEGER DEFAULT 3,
-    error_message   TEXT,
     total_duration  INTEGER DEFAULT 0,
     played          INTEGER DEFAULT 0,
     play_progress   INTEGER DEFAULT 0,
@@ -57,8 +64,7 @@ CREATE TABLE resources (
     tags            TEXT,
     remark          TEXT,
     create_time     DATETIME,
-    update_time     DATETIME,
-    completed_time  DATETIME
+    update_time     DATETIME
 );
 CREATE UNIQUE INDEX idx_resources_info_hash ON resources(info_hash) WHERE info_hash IS NOT NULL;
 `).Error
@@ -232,25 +238,30 @@ func TestListDownloadTasks(t *testing.T) {
 	d := newTestResourceDAO(t)
 
 	now := time.Now()
-	mk := func(hash string, status models.JobStatus, minute int) *models.Resource {
+	mk := func(hash string, state models.TaskState, minute int) *models.Resource {
 		name := hash
 		created := now.Add(time.Duration(minute) * time.Minute)
 		return &models.Resource{
-			InfoHash:       hash,
-			ResourceName:   &name,
-			DownloadStatus: status,
-			CreateTime:     &created,
-			UpdateTime:     &created,
+			InfoHash:     hash,
+			ResourceName: &name,
+			Kind:         models.KindTorrent,
+			TaskState:    state,
+			LocalState:   models.LocalNone,
+			CreateTime:   &created,
+			UpdateTime:   &created,
 		}
 	}
 
-	// 爬虫原始记录（状态 0）与本地视频不应出现在下载任务列表。
-	if err := d.Save(mk("hash-raw", models.JobStatus0, 0)); err != nil {
+	// 爬虫原始记录（Discovered）与本地视频不应出现在下载任务列表。
+	if err := d.Save(mk("hash-raw", models.TaskDiscovered, 0)); err != nil {
 		t.Fatalf("写入原始记录失败: %v", err)
 	}
 	localName := "本地视频"
 	if err := d.SaveLocalResource(&models.Resource{
 		ResourceName: &localName,
+		Kind:         models.KindLocal,
+		TaskState:    models.TaskCompleted,
+		LocalState:   models.LocalPresent,
 		CreateTime:   &now,
 		UpdateTime:   &now,
 	}); err != nil {
@@ -258,14 +269,14 @@ func TestListDownloadTasks(t *testing.T) {
 	}
 
 	// 下载中、已完成、已取消三条任务应全部返回。
-	statuses := []models.JobStatus{
-		models.JobStatusDownloading,
-		models.JobStatusCompleted,
-		models.JobStatusCancelled,
+	states := []models.TaskState{
+		models.TaskDownloading,
+		models.TaskCompleted,
+		models.TaskCancelled,
 	}
-	for i, status := range statuses {
+	for i, state := range states {
 		hash := "hash-task-" + string(rune('a'+i))
-		if err := d.Save(mk(hash, status, i+1)); err != nil {
+		if err := d.Save(mk(hash, state, i+1)); err != nil {
 			t.Fatalf("写入下载任务失败: %v", err)
 		}
 	}
@@ -274,20 +285,28 @@ func TestListDownloadTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("查询下载任务失败: %v", err)
 	}
-	if len(tasks) != len(statuses) {
-		t.Fatalf("下载任务数 = %d, want %d (%v)", len(tasks), len(statuses), tasks)
+	if len(tasks) != len(states) {
+		t.Fatalf("下载任务数 = %d, want %d (%v)", len(tasks), len(states), tasks)
 	}
 
-	byStatus, err := d.ListByDownloadStatuses([]models.JobStatus{models.JobStatusDownloading})
+	byState, err := d.ListByTaskStates([]models.TaskState{models.TaskDownloading})
 	if err != nil {
 		t.Fatalf("按状态查询失败: %v", err)
 	}
-	if len(byStatus) != 1 || byStatus[0].InfoHash != "hash-task-a" {
-		t.Fatalf("按状态查询结果 = %v", byStatus)
+	if len(byState) != 1 || byState[0].InfoHash != "hash-task-a" {
+		t.Fatalf("按状态查询结果 = %v", byState)
 	}
 
-	none, err := d.ListByDownloadStatuses(nil)
+	none, err := d.ListByTaskStates(nil)
 	if err != nil || none != nil {
 		t.Fatalf("空状态列表应返回 nil, got %v, err %v", none, err)
+	}
+
+	completed, err := d.ListCompletedTasks()
+	if err != nil {
+		t.Fatalf("查询已完成任务失败: %v", err)
+	}
+	if len(completed) != 1 || completed[0].InfoHash != "hash-task-b" {
+		t.Fatalf("已完成任务结果 = %v", completed)
 	}
 }

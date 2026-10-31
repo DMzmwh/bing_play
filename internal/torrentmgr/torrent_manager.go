@@ -22,6 +22,7 @@ import (
 	"github.com/bing/bing-play/internal/utils/ip"
 
 	"github.com/anacrolix/dht/v2"
+	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -144,8 +145,7 @@ func NewManager(lc fx.Lifecycle, cn WailsAppParams) (*TorrentManager, error) {
 		pieces:      make(map[string]storage.PieceCompletion),
 	}
 
-	// 启动时恢复未完成任务：下载中 / 获取元信息 / 排队中的任务重新入队，
-	// 依赖 piece completion 目录实现断点续传。暂停任务保持暂停，交由用户手动继续。
+	// 启动时按状态机恢复规则恢复未完成任务。
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
 			go manager.RecoverPendingJobs()
@@ -269,7 +269,7 @@ func (m *TorrentManager) ListJobs() []*vo.TorrentJobVO {
 // sortDownloadVOs 下载任务排序：状态权重 → 优先级 → 创建时间。
 func sortDownloadVOs(result []*vo.TorrentJobVO) {
 	sort.SliceStable(result, func(i, j int) bool {
-		left, right := statusRank(result[i].Status), statusRank(result[j].Status)
+		left, right := taskStateRank(result[i].TaskState), taskStateRank(result[j].TaskState)
 		if left != right {
 			return left < right
 		}
@@ -294,7 +294,7 @@ func (m *TorrentManager) ListActiveJobs() []*vo.TorrentJobVO {
 	for _, job := range jobs {
 		payload := job.ToVO()
 		// 已完成任务统一从数据库查询，避免与完成记录重复展示
-		if payload.Status == models.JobStatusCompleted {
+		if payload.TaskState == models.TaskCompleted.String() {
 			continue
 		}
 		result = append(result, payload)
@@ -306,7 +306,7 @@ func (m *TorrentManager) ListActiveJobs() []*vo.TorrentJobVO {
 
 // ListCompletedJobs 从数据库读取已完成任务，仅在打开下载页时调用一次。
 func (m *TorrentManager) ListCompletedJobs() ([]*vo.TorrentJobVO, error) {
-	rows, err := m.ResourceDao.ListByDownloadStatuses([]models.JobStatus{models.JobStatusCompleted})
+	rows, err := m.ResourceDao.ListCompletedTasks()
 	if err != nil {
 		return nil, err
 	}
@@ -320,35 +320,44 @@ func (m *TorrentManager) ListCompletedJobs() ([]*vo.TorrentJobVO, error) {
 	return result, nil
 }
 
-// statusRank 下载页排序权重：进行中的任务靠前，已完成 / 取消靠后。
-func statusRank(status models.JobStatus) int {
-	switch status {
-	case models.JobStatusDownloading:
+// taskStateRank 下载页排序权重：进行中的任务靠前，已完成 / 取消靠后。
+func taskStateRank(state string) int {
+	switch state {
+	case models.TaskDownloading.String():
 		return 0
-	case models.JobStatusDownloadMetaInfo:
+	case models.TaskVerifying.String():
 		return 1
-	case models.JobStatusQueued:
+	case models.TaskPreparing.String():
 		return 2
-	case models.JobStatusPaused:
+	case models.TaskQueued.String():
 		return 3
-	case models.JobStatusFailed:
+	case models.TaskRetryWait.String():
 		return 4
-	case models.JobStatusCompleted:
+	case models.TaskPaused.String():
 		return 5
-	case models.JobStatusCancelled:
+	case models.TaskFailed.String():
 		return 6
-	default:
+	case models.TaskCompleted.String():
 		return 7
+	case models.TaskCancelled.String():
+		return 8
+	default:
+		return 9
 	}
 }
 
 // voFromResource 把数据库记录转换成任务快照（无内存运行时数据时使用）。
 func voFromResource(resource *models.Resource) *vo.TorrentJobVO {
 	payload := &vo.TorrentJobVO{
-		InfoHash:   resource.InfoHash,
-		Status:     resource.DownloadStatus,
-		SavePath:   resource.LocalPath,
-		EtaSeconds: -1,
+		InfoHash:     resource.InfoHash,
+		TaskState:    resource.TaskState.String(),
+		LocalState:   resource.LocalState.String(),
+		DisplayState: resource.Display().String(),
+		SavePath:     resource.LocalPath,
+		Attempt:      int(resource.Attempt),
+		MaxAttempts:  int(resource.MaxAttempts),
+		ErrorCode:    resource.ErrorCode,
+		EtaSeconds:   -1,
 	}
 	if resource.ResourceName != nil {
 		payload.Name = *resource.ResourceName
@@ -365,17 +374,14 @@ func voFromResource(resource *models.Resource) *vo.TorrentJobVO {
 	if resource.Priority != nil {
 		payload.Priority = *resource.Priority
 	}
-	if resource.RetryCount != nil {
-		payload.RetryCount = *resource.RetryCount
-	}
-	if resource.ErrorMessage != nil {
-		payload.ErrorMessage = *resource.ErrorMessage
-	}
 	if resource.CreateTime != nil {
 		payload.CreatedTime = resource.CreateTime.Format(time.DateTime)
 	}
-	if resource.CompletedTime != nil {
-		payload.CompletedTime = resource.CompletedTime.Format(time.DateTime)
+	if resource.VerifiedAt != nil {
+		payload.VerifiedAt = resource.VerifiedAt.Format(time.DateTime)
+	}
+	if resource.NextRetryAt != nil {
+		payload.NextRetryAt = resource.NextRetryAt.Format(time.DateTime)
 	}
 	if payload.TotalSize > 0 {
 		payload.Progress = float64(payload.Downloaded) / float64(payload.TotalSize) * 100
@@ -383,7 +389,7 @@ func voFromResource(resource *models.Resource) *vo.TorrentJobVO {
 			payload.Progress = 100
 		}
 	}
-	if payload.Status == models.JobStatusCompleted {
+	if resource.TaskState == models.TaskCompleted {
 		payload.Progress = 100
 		payload.EtaSeconds = 0
 	}
@@ -392,22 +398,133 @@ func voFromResource(resource *models.Resource) *vo.TorrentJobVO {
 
 // PauseJob 暂停任务。
 func (m *TorrentManager) PauseJob(infoHash string) error {
+	if job, err := m.GetJob(infoHash); err == nil {
+		return job.Pause()
+	}
+	return m.applyResourceEvent(infoHash, models.EvPause, models.EventPayload{Now: time.Now()})
+}
+
+// ResumeJob 继续暂停的任务；内存中没有任务时从数据库重新入队。
+func (m *TorrentManager) ResumeJob(infoHash string) error {
 	job, err := m.GetJob(infoHash)
+	if err == nil {
+		return m.resumeJob(job)
+	}
+
+	resource, dbErr := m.ResourceDao.GetByInfoHash(infoHash)
+	if dbErr != nil {
+		return dbErr
+	}
+	if resource == nil {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+	_, _, err = m.enqueueResource(resource, 0, models.EvResume)
+	return err
+}
+
+// RetryJob 重试失败 / 取消的任务，重新拉取元信息。
+func (m *TorrentManager) RetryJob(infoHash string) error {
+	job, err := m.GetJob(infoHash)
+	if err == nil {
+		return m.retryJob(job, 0)
+	}
+
+	resource, dbErr := m.ResourceDao.GetByInfoHash(infoHash)
+	if dbErr != nil {
+		return dbErr
+	}
+	if resource == nil {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+	_, _, err = m.enqueueResource(resource, 0, 0)
+	return err
+}
+
+// resumeJob 根据任务当前状态继续下载。
+func (m *TorrentManager) resumeJob(job *TorrentJob) error {
+	res, err := job.Apply(models.EvResume, models.EventPayload{
+		Now:           time.Now(),
+		MetadataReady: job.metadataReady(),
+	})
 	if err != nil {
 		return err
 	}
 
-	job.Pause()
-	m.persistJob(job)
-	m.emitState(job)
+	switch res.Task {
+	case models.TaskQueued:
+		job.resetContext()
+		go m.schedule()
+	case models.TaskPreparing:
+		job.resetContext()
+		if tt := job.getTorrent(); tt != nil {
+			tt.Drop()
+		}
+		if err := m.restartTorrent(job); err != nil {
+			m.failOrRetry(job, classifyTorrentError(err))
+			return nil
+		}
+		go m.waitMetadata(job)
+	}
 	return nil
 }
 
-// ResumeJob 继续暂停 / 失败 / 取消的任务；内存中没有任务时从数据库重新入队。
-func (m *TorrentManager) ResumeJob(infoHash string) error {
-	job, err := m.GetJob(infoHash)
-	if err == nil {
-		m.resumeJob(job)
+// retryJob 按失败 / 取消状态执行手动重试或重新下载。
+func (m *TorrentManager) retryJob(job *TorrentJob, priority int) error {
+	state := job.currentState()
+	var e models.Event
+	switch state {
+	case models.TaskFailed:
+		e = models.EvManualRetry
+	case models.TaskCancelled:
+		e = models.EvRedownload
+	case models.TaskCompleted:
+		return errors.New(ErrKeyRepairNotNeeded)
+	default:
+		return nil
+	}
+
+	res, err := job.Apply(e, models.EventPayload{
+		Now:             time.Now(),
+		SourceAvailable: job.sourceAvailable(),
+	})
+	if err != nil {
+		return err
+	}
+	if res.Task != models.TaskPreparing {
+		return nil
+	}
+
+	job.resetContext()
+	if tt := job.getTorrent(); tt != nil {
+		tt.Drop()
+	}
+	if err := m.restartTorrent(job); err != nil {
+		m.failOrRetry(job, classifyTorrentError(err))
+		return nil
+	}
+	go m.waitMetadata(job)
+	return nil
+}
+
+// RepairJob 修复本地文件缺失 / 损坏的已完成任务。
+func (m *TorrentManager) RepairJob(infoHash string) error {
+	if job, err := m.GetJob(infoHash); err == nil {
+		res, applyErr := job.Apply(models.EvRepair, models.EventPayload{Now: time.Now(), SourceAvailable: job.sourceAvailable()})
+		if applyErr != nil {
+			return applyErr
+		}
+		if res.Task != models.TaskPreparing {
+			return nil
+		}
+		job.resetContext()
+		if tt := job.getTorrent(); tt != nil {
+			tt.Drop()
+		}
+		if err := m.restartTorrent(job); err != nil {
+			m.failOrRetry(job, classifyTorrentError(err))
+			return nil
+		}
+		go m.waitMetadata(job)
 		return nil
 	}
 
@@ -418,80 +535,20 @@ func (m *TorrentManager) ResumeJob(infoHash string) error {
 	if resource == nil {
 		return errors.New(ErrKeyTaskNotFound)
 	}
-
-	_, _, enqueueErr := m.enqueueResource(resource, 0)
+	_, _, enqueueErr := m.enqueueResource(resource, 0, models.EvRepair)
 	return enqueueErr
 }
 
-// RetryJob 重试失败任务，重置重试计数后重新拉取元信息。
-func (m *TorrentManager) RetryJob(infoHash string) error {
-	return m.ResumeJob(infoHash)
-}
-
-// resumeJob 根据任务当前状态继续或重新开始下载。
-func (m *TorrentManager) resumeJob(job *TorrentJob) {
-	status := job.currentStatus()
-	tt := job.getTorrent()
-
-	switch status {
-	case models.JobStatusPaused:
-		job.resetContext()
-		job.setStatus(models.JobStatusQueued)
-		job.clearError()
-		m.persistJob(job)
-		m.emitState(job)
-
-		// 元信息已就绪时直接等待调度；否则继续等待元信息。
-		if tt != nil && tt.Info() != nil {
-			m.schedule()
-			return
-		}
-		go m.waitMetadata(job)
-
-	case models.JobStatusFailed, models.JobStatusCancelled:
-		job.resetContext()
-		job.resetForRetry()
-		m.persistJob(job)
-		m.emitState(job)
-
-		if tt != nil {
-			tt.Drop()
-		}
-		if err := m.restartTorrent(job); err != nil {
-			m.markFailed(job, classifyTorrentError(err))
-			return
-		}
-		go m.waitMetadata(job)
-
-	default:
-		// 获取元信息 / 排队 / 下载中 / 已完成：无需处理
-	}
-}
-
 // CancelJob 取消任务，保留数据库记录用于下载页展示。
-// 内存中没有任务时（例如应用重启后遗留的失败任务）直接更新数据库状态。
 func (m *TorrentManager) CancelJob(infoHash string) error {
 	job, err := m.GetJob(infoHash)
 	if err != nil {
-		resource, dbErr := m.ResourceDao.GetByInfoHash(infoHash)
-		if dbErr != nil {
-			return dbErr
-		}
-		if resource == nil {
-			return errors.New(ErrKeyTaskNotFound)
-		}
-		if resource.DownloadStatus == models.JobStatusCompleted {
-			return nil
-		}
-		resource.DownloadStatus = models.JobStatusCancelled
-		now := time.Now()
-		resource.UpdateTime = &now
-		return m.ResourceDao.Save(resource)
+		return m.applyResourceEvent(infoHash, models.EvCancel, models.EventPayload{Now: time.Now()})
 	}
 
-	job.Cancel()
-	m.persistJob(job)
-	m.emitState(job)
+	if cancelErr := job.Cancel(); cancelErr != nil {
+		return cancelErr
+	}
 
 	m.mu.Lock()
 	delete(m.jobsMap, infoHash)
@@ -506,7 +563,11 @@ func (m *TorrentManager) SetPriority(infoHash string, priority int) error {
 	job, err := m.GetJob(infoHash)
 	if err == nil {
 		if job.forcePriority(priority) {
-			m.persistJob(job)
+			if id := job.id(); id != 0 {
+				if err := m.ResourceDao.UpdatePriority(id, priority); err != nil {
+					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+				}
+			}
 			m.emitState(job)
 			go m.schedule()
 		}
@@ -526,30 +587,73 @@ func (m *TorrentManager) SetPriority(infoHash string, priority int) error {
 	return m.ResourceDao.Save(resource)
 }
 
-// clearError 清除任务错误信息。
-func (job *TorrentJob) clearError() {
-	job.mu.Lock()
-	job.errorKey = ""
-	job.job.ErrorMessage = nil
-	job.mu.Unlock()
-}
-
-// persistJob 持久化任务当前状态。
-func (m *TorrentManager) persistJob(job *TorrentJob) {
-	if job == nil {
-		return
+// applyResourceEvent 对内存中不存在的任务直接执行状态机流转并落库。
+func (m *TorrentManager) applyResourceEvent(infoHash string, e models.Event, p models.EventPayload) error {
+	resource, err := m.ResourceDao.GetByInfoHash(infoHash)
+	if err != nil {
+		return err
 	}
-	m.persistResource(job.snapshotResource())
-}
-
-// persistResource 写入资源记录，失败只记录日志。
-func (m *TorrentManager) persistResource(resource *models.Resource) {
 	if resource == nil {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+	if p.Now.IsZero() {
+		p.Now = time.Now()
+	}
+	if !p.SourceAvailable {
+		p.SourceAvailable = sourceAvailable(resource)
+	}
+
+	fromVersion := resource.StateVersion
+	res, err := resource.ApplyEvent(e, p)
+	if err != nil {
+		return err
+	}
+	if res.VersionDelta == 0 {
+		return nil
+	}
+
+	now := p.Now
+	resource.UpdateTime = &now
+	if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
+		return err
+	}
+	emitDownloadEvent(EventDownloadStateChanged, voFromResource(resource))
+	return nil
+}
+
+// persistSnapshot 以 CAS 方式写入资源快照，返回是否写入成功。
+// 失败通常意味着存在更新的写入，本次陈旧快照被丢弃。
+func (m *TorrentManager) persistSnapshot(resource *models.Resource, fromVersion uint64) bool {
+	if resource == nil {
+		return false
+	}
+	ok, err := m.ResourceDao.UpdateState(resource, fromVersion)
+	if err != nil {
+		logger.Torrent.Error("保存下载任务失败", slog.String("info_hash", resource.InfoHash), slog.Any("err", err))
+		return false
+	}
+	if !ok {
+		logger.Torrent.Debug("下载任务状态版本已变化，丢弃陈旧快照",
+			slog.String("info_hash", resource.InfoHash),
+			slog.Uint64("expected", fromVersion),
+			slog.Uint64("actual", resource.StateVersion),
+		)
+		m.syncJobVersion(resource.InfoHash)
+	}
+	return ok
+}
+
+// syncJobVersion 同步内存任务的最新落库版本，避免后续 CAS 持续失败。
+func (m *TorrentManager) syncJobVersion(infoHash string) {
+	resource, err := m.ResourceDao.GetByInfoHash(infoHash)
+	if err != nil || resource == nil {
 		return
 	}
-	if err := m.ResourceDao.Save(resource); err != nil {
-		logger.Torrent.Error("保存下载任务失败", slog.String("info_hash", resource.InfoHash), slog.Any("err", err))
+	job, err := m.GetJob(infoHash)
+	if err != nil {
+		return
 	}
+	job.syncPersistedVersion(resource.StateVersion)
 }
 
 // emitState 推送任务状态变更事件。
@@ -558,19 +662,6 @@ func (m *TorrentManager) emitState(job *TorrentJob) {
 		return
 	}
 	emitDownloadEvent(EventDownloadStateChanged, job.ToVO())
-}
-
-// markFailed 将任务标记为失败并持久化。
-func (m *TorrentManager) markFailed(job *TorrentJob, errorKey string) {
-	if job == nil {
-		return
-	}
-	job.mu.RLock()
-	retries := job.retries
-	job.mu.RUnlock()
-	job.setFailureState(models.JobStatusFailed, errorKey, retries)
-	m.persistJob(job)
-	m.emitState(job)
 }
 
 // schedule 持续领取排队任务，直到信号量用尽或队列为空。
@@ -589,124 +680,117 @@ func (m *TorrentManager) schedule() {
 	}
 }
 
-// claimNextQueued 选取优先级最高的排队任务并标记为下载中，避免同一任务被重复调度。
+// claimNextQueued 选取优先级最高的排队任务并流转为下载中，避免同一任务被重复调度。
 func (m *TorrentManager) claimNextQueued() *TorrentJob {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var best *TorrentJob
-	var bestPriority int
-	var bestCreate time.Time
-
+	m.mu.RLock()
+	candidates := make([]*TorrentJob, 0, len(m.jobsMap))
 	for _, job := range m.jobsMap {
-		if job.currentStatus() != models.JobStatusQueued {
+		if job.currentState() == models.TaskQueued {
+			candidates = append(candidates, job)
+		}
+	}
+	m.mu.RUnlock()
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// 优先级倒序 → 创建时间正序 → InfoHash 稳定排序。
+	sort.SliceStable(candidates, func(i, j int) bool {
+		pi, pj := candidates[i].priorityValue(), candidates[j].priorityValue()
+		if pi != pj {
+			return pi > pj
+		}
+		ti, tj := candidates[i].createTimeValue(), candidates[j].createTimeValue()
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return candidates[i].infoHash() < candidates[j].infoHash()
+	})
+
+	for _, job := range candidates {
+		res, err := job.Apply(models.EvSlotGranted, models.EventPayload{Now: time.Now()})
+		if err != nil {
 			continue
 		}
-		priority := job.priorityValue()
-		created := job.createTimeValue()
-		if best == nil ||
-			priority > bestPriority ||
-			(priority == bestPriority && created.Before(bestCreate)) ||
-			(priority == bestPriority && created.Equal(bestCreate) && job.job.InfoHash < best.job.InfoHash) {
-			best = job
-			bestPriority = priority
-			bestCreate = created
+		if res.Task == models.TaskDownloading {
+			return job
 		}
 	}
-
-	if best == nil {
-		return nil
-	}
-
-	best.mu.Lock()
-	if best.Status != models.JobStatusQueued {
-		best.mu.Unlock()
-		return nil
-	}
-	best.Status = models.JobStatusDownloading
-	best.job.DownloadStatus = models.JobStatusDownloading
-	now := time.Now()
-	best.job.UpdateTime = &now
-	best.mu.Unlock()
-
-	return best
+	return nil
 }
 
-// runJob 执行下载并处理结束状态。
+// runJob 执行下载；暂停 / 取消 / 完成的状态流转由对应事件完成。
 func (m *TorrentManager) runJob(job *TorrentJob) {
 	defer func() {
 		m.sem.Release(1)
 		go m.schedule()
 	}()
 
-	outcome := job.StartDownload()
-	switch outcome {
-	case outcomeStalled:
+	if job.StartDownload() == outcomeStalled {
 		m.failOrRetry(job, ErrKeyStalled)
-	case outcomeCompleted:
-		m.persistJob(job)
-	case outcomePaused, outcomeCancelled:
-		m.persistJob(job)
 	}
-
-	m.emitState(job)
 }
 
-// failOrRetry 记录失败原因并按重试次数决定重新入队或标记失败。
+// failOrRetry 记录失败原因并按尝试次数决定进入重试等待或标记失败。
 func (m *TorrentManager) failOrRetry(job *TorrentJob, errorKey string) {
 	if job == nil {
 		return
 	}
-
-	job.mu.Lock()
-	if job.Status == models.JobStatusCancelled || job.Status == models.JobStatusPaused {
-		job.mu.Unlock()
+	state := job.currentState()
+	if state != models.TaskDownloading && state != models.TaskPreparing {
 		return
 	}
 
-	retries := job.retries + 1
-	exhausted := retries > m.downloadCfg.MaxRetries
-	nextStatus := models.JobStatusDownloadMetaInfo
-	if exhausted {
-		nextStatus = models.JobStatusFailed
-	}
-	job.retries = retries
-	job.errorKey = errorKey
-	job.Status = nextStatus
-	job.job.DownloadStatus = nextStatus
-	job.job.RetryCount = &retries
-	job.job.ErrorMessage = &errorKey
 	now := time.Now()
-	job.job.UpdateTime = &now
-	ctx := job.ctx
-	tt := job.torrent
-	infoHash := job.job.InfoHash
-	job.mu.Unlock()
-
-	if tt != nil {
-		tt.Drop()
+	attempt := job.attempt() + 1
+	var p = models.EventPayload{
+		Now:       now,
+		Attempt:   attempt,
+		ErrorCode: errorKey,
 	}
-	m.persistJob(job)
-	m.emitState(job)
+	if attempt < job.maxAttempts() {
+		next := now.Add(m.downloadCfg.RetryDelay)
+		p.NextRetryAt = &next
+	}
 
-	if exhausted {
+	e := models.EvStalled
+	if state == models.TaskPreparing {
+		e = models.EvMetaTimeout
+	}
+
+	res, err := job.Apply(e, p)
+	if err != nil {
+		logger.Torrent.Warn("下载任务失败流转被拒绝", slog.String("info_hash", job.infoHash()), slog.Any("err", err))
+		return
+	}
+
+	if res.Task == models.TaskFailed {
 		logger.Torrent.Error("下载任务重试次数耗尽",
-			slog.String("info_hash", infoHash),
+			slog.String("info_hash", job.infoHash()),
 			slog.String("error", errorKey),
-			slog.Int("retries", retries),
+			slog.Int("attempt", int(attempt)),
 		)
 		return
 	}
+	if res.Task != models.TaskRetryWait {
+		return
+	}
 
+	ctx := job.getContext()
+	delay := m.downloadCfg.RetryDelay
+	infoHash := job.infoHash()
 	go func() {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(m.downloadCfg.RetryDelay):
+		case <-time.After(delay):
 		}
 
 		// 等待期间可能被暂停 / 取消，需要再次确认状态
-		if job.currentStatus() != models.JobStatusDownloadMetaInfo {
+		if job.currentState() != models.TaskRetryWait {
+			return
+		}
+		if _, err := job.Apply(models.EvRetryDelayElapsed, models.EventPayload{Now: time.Now()}); err != nil {
 			return
 		}
 		job.resetContext()
@@ -716,6 +800,13 @@ func (m *TorrentManager) failOrRetry(job *TorrentJob, errorKey string) {
 		}
 		go m.waitMetadata(job)
 	}()
+
+	logger.Torrent.Info("下载任务将在稍后自动重试",
+		slog.String("info_hash", infoHash),
+		slog.String("error", errorKey),
+		slog.Int("attempt", int(attempt)),
+		slog.Duration("delay", delay),
+	)
 }
 
 // waitMetadata 等待 Torrent 元信息；超时后触发自动重试。
@@ -736,7 +827,7 @@ func (m *TorrentManager) waitMetadata(job *TorrentJob) {
 		if ctx.Err() != nil {
 			return
 		}
-		if job.currentStatus() != models.JobStatusDownloadMetaInfo {
+		if job.currentState() != models.TaskPreparing {
 			return
 		}
 		m.failOrRetry(job, ErrKeyMetadataTimeout)
@@ -750,22 +841,18 @@ func (m *TorrentManager) onMetadataReady(job *TorrentJob, tt *torrent.Torrent) {
 		return
 	}
 
-	job.mu.Lock()
-	if job.Status == models.JobStatusCancelled || job.Status == models.JobStatusPaused {
-		job.mu.Unlock()
-		return
-	}
-
 	name := info.Name
 	total := info.TotalLength()
 	now := time.Now()
+
+	job.mu.Lock()
+	if job.job.TaskState != models.TaskPreparing {
+		job.mu.Unlock()
+		return
+	}
 	job.job.ResourceName = &name
 	job.job.TotalSize = &total
 	job.job.UpdateTime = &now
-	job.Status = models.JobStatusQueued
-	job.job.DownloadStatus = models.JobStatusQueued
-	job.retries = 0
-	job.job.RetryCount = &job.retries
 
 	if job.job.FileName == nil {
 		var bestName string
@@ -790,8 +877,11 @@ func (m *TorrentManager) onMetadataReady(job *TorrentJob, tt *torrent.Torrent) {
 
 	// 元信息只获取一次，缓存到下载目录后重启可跳过 DHT 拉取，直接续传。
 	m.cacheMetadata(baseDir, infoHash, tt)
-	m.persistJob(job)
-	m.emitState(job)
+
+	if _, err := job.Apply(models.EvMetaReady, models.EventPayload{Now: now}); err != nil {
+		logger.Torrent.Warn("元信息就绪流转失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+		return
+	}
 	m.schedule()
 }
 
@@ -813,39 +903,190 @@ func (m *TorrentManager) cacheMetadata(baseDir, infoHash string, tt *torrent.Tor
 	}
 }
 
-// recoverStatuses 启动时需要恢复的任务状态。
-var recoverStatuses = []models.JobStatus{
-	models.JobStatusDownloadMetaInfo,
-	models.JobStatusQueued,
-	models.JobStatusDownloading,
+// recoverTaskStates 启动时需要恢复的任务状态。
+var recoverTaskStates = []models.TaskState{
+	models.TaskPreparing,
+	models.TaskQueued,
+	models.TaskDownloading,
+	models.TaskVerifying,
+	models.TaskRetryWait,
 }
 
-// RecoverPendingJobs 应用启动后恢复未完成的下载任务，实现断点续传。
+// RecoverPendingJobs 应用启动后按状态机恢复规则恢复未完成的下载任务。
 func (m *TorrentManager) RecoverPendingJobs() {
-	rows, err := m.ResourceDao.ListByDownloadStatuses(recoverStatuses)
+	rows, err := m.ResourceDao.ListByTaskStates(recoverTaskStates)
 	if err != nil {
 		logger.Torrent.Error("恢复未完成下载任务失败", slog.Any("err", err))
 		return
 	}
-	if len(rows) == 0 {
+
+	for i := range rows {
+		m.recoverResource(&rows[i])
+	}
+
+	m.checkCompletedLocalFiles()
+	logger.Torrent.Info("已恢复未完成下载任务", slog.Int("count", len(rows)))
+	m.schedule()
+}
+
+// recoverResource 按 §7 恢复规则恢复单个任务。
+//
+// Downloading 中断后回到 Preparing 重新挂载；Verifying 重新执行落盘校验；
+// RetryWait 未到重试时间则等待；Paused 保持暂停，不进入内存。
+func (m *TorrentManager) recoverResource(resource *models.Resource) {
+	if resource == nil || resource.Kind != models.KindTorrent {
+		return
+	}
+	if resource.InfoHash == "" && resource.SourceURL == nil && resource.TorrentPath == nil {
 		return
 	}
 
-	for i := range rows {
-		resource := &rows[i]
-		if resource.InfoHash == "" && resource.SourceURL == nil && resource.TorrentPath == nil {
-			continue
+	now := time.Now()
+	switch resource.TaskState {
+	case models.TaskDownloading:
+		m.rewriteState(resource, models.TaskPreparing)
+	case models.TaskVerifying:
+		// 保持 Verifying，挂载后重新校验
+	case models.TaskRetryWait:
+		if resource.NextRetryAt != nil && resource.NextRetryAt.After(now) {
+			go m.waitRetryDelay(resource)
+			return
 		}
-		if _, _, enqueueErr := m.enqueueResource(resource, 0); enqueueErr != nil {
-			logger.Torrent.Warn("恢复下载任务失败",
-				slog.String("info_hash", resource.InfoHash),
-				slog.Any("err", enqueueErr),
-			)
-		}
+		m.rewriteState(resource, models.TaskPreparing)
+	case models.TaskPreparing, models.TaskQueued:
+		// 保持不变
+	default:
+		return
 	}
 
-	logger.Torrent.Info("已恢复未完成下载任务", slog.Int("count", len(rows)))
-	m.schedule()
+	spec, magnet, torrentPath, err := m.specFromResource(resource)
+	if err != nil {
+		m.failResource(resource, ErrKeyNoSource)
+		return
+	}
+
+	job := m.newJob(resource, magnet, torrentPath)
+	if err := m.attachTorrent(job, spec); err != nil {
+		m.markJobAttachFailed(job, classifyTorrentError(err))
+		return
+	}
+
+	m.mu.Lock()
+	m.jobsMap[resource.InfoHash] = job
+	m.mu.Unlock()
+
+	switch resource.TaskState {
+	case models.TaskVerifying:
+		go m.reverifyJob(job)
+	case models.TaskQueued:
+		go m.schedule()
+	default:
+		go m.waitMetadata(job)
+	}
+}
+
+// rewriteState 启动恢复时直接改写任务状态并落库（Downloading / RetryWait → Preparing）。
+func (m *TorrentManager) rewriteState(resource *models.Resource, to models.TaskState) {
+	fromVersion := resource.StateVersion
+	now := time.Now()
+	resource.TaskState = to
+	if resource.LocalState == models.LocalPresent {
+		resource.LocalState = models.LocalPartial
+	}
+	resource.StateVersion++
+	resource.StateChangedAt = &now
+	resource.UpdateTime = &now
+	resource.NextRetryAt = nil
+	if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
+		logger.Torrent.Warn("恢复任务状态失败", slog.String("info_hash", resource.InfoHash), slog.Any("err", err))
+	}
+}
+
+// waitRetryDelay 恢复 RetryWait 任务：到点后重新挂载并等待元信息。
+func (m *TorrentManager) waitRetryDelay(resource *models.Resource) {
+	delay := time.Until(*resource.NextRetryAt)
+	if delay < 0 {
+		delay = 0
+	}
+	time.Sleep(delay)
+
+	row, err := m.ResourceDao.GetByInfoHash(resource.InfoHash)
+	if err != nil || row == nil || row.TaskState != models.TaskRetryWait {
+		return
+	}
+	spec, magnet, torrentPath, err := m.specFromResource(row)
+	if err != nil {
+		m.failResource(row, ErrKeyNoSource)
+		return
+	}
+
+	job := m.newJob(row, magnet, torrentPath)
+	if _, err := job.Apply(models.EvRetryDelayElapsed, models.EventPayload{Now: time.Now()}); err != nil {
+		return
+	}
+	job.resetContext()
+	if err := m.attachTorrent(job, spec); err != nil {
+		m.markJobAttachFailed(job, classifyTorrentError(err))
+		return
+	}
+	m.mu.Lock()
+	m.jobsMap[row.InfoHash] = job
+	m.mu.Unlock()
+	go m.waitMetadata(job)
+}
+
+// reverifyJob 恢复 Verifying 任务：挂载后重新执行落盘校验。
+func (m *TorrentManager) reverifyJob(job *TorrentJob) {
+	tt := job.getTorrent()
+	if tt == nil || tt.Info() == nil {
+		return
+	}
+	job.mu.RLock()
+	baseDir := job.job.LocalPath
+	job.mu.RUnlock()
+
+	check := verifyCompletedFiles(tt, baseDir)
+	now := time.Now()
+	switch {
+	case check.missing:
+		job.Apply(models.EvVerifyMissing, models.EventPayload{Now: now, ErrorCode: ErrKeyIntegrity, LossReason: models.LossNotFound})
+	case check.mismatch:
+		job.Apply(models.EvVerifyCorrupted, models.EventPayload{Now: now, ErrorCode: ErrKeyIntegrity, LossReason: models.LossSizeMismatch})
+	default:
+		job.Apply(models.EvVerifyOK, models.EventPayload{Now: now})
+	}
+}
+
+// checkCompletedLocalFiles 启动时检查已完成任务的主文件是否仍然存在。
+func (m *TorrentManager) checkCompletedLocalFiles() {
+	rows, err := m.ResourceDao.ListCompletedTasks()
+	if err != nil {
+		logger.Torrent.Warn("检查已完成任务本地文件失败", slog.Any("err", err))
+		return
+	}
+	for i := range rows {
+		resource := &rows[i]
+		if resource.LocalState != models.LocalPresent || resource.FileName == nil || resource.LocalPath == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(resource.LocalPath, *resource.FileName)); err != nil {
+			m.applyResourceEvent(resource.InfoHash, models.EvFileLost, models.EventPayload{
+				Now:        time.Now(),
+				LossReason: models.LossNotFound,
+			})
+		}
+	}
+}
+
+// failResource 对内存中不存在的任务直接标记失败。
+func (m *TorrentManager) failResource(resource *models.Resource, errorKey string) {
+	if resource == nil {
+		return
+	}
+	m.applyResourceEvent(resource.InfoHash, models.EvSourceUnresolved, models.EventPayload{
+		Now:       time.Now(),
+		ErrorCode: errorKey,
+	})
 }
 
 // AddMagnet 添加单个 Magnet。
@@ -889,7 +1130,7 @@ func (m *TorrentManager) DownloadResources(ids []int64, priority int) (*BatchDow
 	}
 
 	for i := range rows {
-		_, added, enqueueErr := m.enqueueResource(&rows[i], priority)
+		_, added, enqueueErr := m.enqueueResource(&rows[i], priority, 0)
 		if enqueueErr != nil {
 			result.addBatchError(errorKeyOf(enqueueErr))
 		} else if added {
@@ -913,7 +1154,7 @@ func (m *TorrentManager) enqueueMagnet(magnet string, priority int) (string, boo
 	if err != nil {
 		return "", false, errors.New(ErrKeyInvalidMagnet)
 	}
-	return m.enqueueSpec(spec, magnet, "", priority)
+	return m.enqueueSpec(spec, magnet, "", priority, models.EvAddDownload)
 }
 
 // enqueueTorrentFile 解析本地 torrent 文件并创建任务。
@@ -928,15 +1169,11 @@ func (m *TorrentManager) enqueueTorrentFile(filePath string, priority int) (stri
 		return "", false, fmt.Errorf("%s: %w", ErrKeyResourceGone, err)
 	}
 	spec := torrent.TorrentSpecFromMetaInfo(mi)
-	return m.enqueueSpec(spec, "", filePath, priority)
+	return m.enqueueSpec(spec, "", filePath, priority, models.EvAddDownload)
 }
 
-// enqueueResource 从数据库记录重新入队（继续 / 恢复 / 重试）。
-func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int) (string, bool, error) {
-	if resource == nil {
-		return "", false, errors.New(ErrKeyTaskNotFound)
-	}
-
+// specFromResource 从数据库记录构建 TorrentSpec，缺失来源时返回 ErrKeyNoSource。
+func (m *TorrentManager) specFromResource(resource *models.Resource) (*torrent.TorrentSpec, string, string, error) {
 	magnet := ""
 	if resource.SourceURL != nil {
 		magnet = strings.TrimSpace(*resource.SourceURL)
@@ -948,13 +1185,13 @@ func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int
 
 	if torrentPath != "" {
 		if mi, err := metainfo.LoadFromFile(torrentPath); err == nil {
-			return m.enqueueSpec(torrent.TorrentSpecFromMetaInfo(mi), magnet, torrentPath, priority)
+			return torrent.TorrentSpecFromMetaInfo(mi), magnet, torrentPath, nil
 		}
 	}
 
 	if magnet == "" {
 		if resource.InfoHash == "" {
-			return "", false, errors.New(ErrKeyNoSource)
+			return nil, "", "", errors.New(ErrKeyNoSource)
 		}
 		// 爬虫记录通常带有磁力链接；仅当缺失时按 InfoHash 构造最小磁力链接。
 		magnet = "magnet:?xt=urn:btih:" + resource.InfoHash
@@ -962,13 +1199,49 @@ func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int
 
 	spec, err := torrent.TorrentSpecFromMagnetUri(magnet)
 	if err != nil {
-		return "", false, errors.New(ErrKeyInvalidMagnet)
+		return nil, "", "", errors.New(ErrKeyInvalidMagnet)
 	}
-	return m.enqueueSpec(spec, magnet, "", priority)
+	return spec, magnet, torrentPath, nil
+}
+
+// enqueueResource 从数据库记录重新入队（继续 / 恢复 / 重试 / 修复）。
+//
+// e 为 0 时按当前状态自动选择事件：Failed → 手动重试、Cancelled → 重新下载、其余 → 新增下载。
+func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int, e models.Event) (string, bool, error) {
+	if resource == nil {
+		return "", false, errors.New(ErrKeyTaskNotFound)
+	}
+	if resource.Kind == models.KindLocal {
+		return "", false, nil
+	}
+	if resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent {
+		return "", false, nil
+	}
+	if resource.TaskState.Active() {
+		return "", false, nil
+	}
+	if e == 0 {
+		switch resource.TaskState {
+		case models.TaskFailed:
+			e = models.EvManualRetry
+		case models.TaskCancelled:
+			e = models.EvRedownload
+		case models.TaskDiscovered:
+			e = models.EvAddDownload
+		default:
+			return "", false, nil
+		}
+	}
+
+	spec, magnet, torrentPath, err := m.specFromResource(resource)
+	if err != nil {
+		return "", false, err
+	}
+	return m.startJob(resource, spec, magnet, torrentPath, priority, e)
 }
 
 // enqueueSpec 把 TorrentSpec 转换成下载任务；已存在或已完成时直接跳过。
-func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentPath string, priority int) (string, bool, error) {
+func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentPath string, priority int, e models.Event) (string, bool, error) {
 	if spec == nil || spec.InfoHash.IsZero() {
 		return "", false, errors.New(ErrKeyInvalidMagnet)
 	}
@@ -980,7 +1253,11 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	if existing := m.jobsMap[infoHash]; existing != nil {
 		m.mu.Unlock()
 		if existing.setPriority(priority) {
-			m.persistJob(existing)
+			if id := existing.id(); id != 0 {
+				if err := m.ResourceDao.UpdatePriority(id, priority); err != nil {
+					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+				}
+			}
 			m.emitState(existing)
 		}
 		return infoHash, false, nil
@@ -995,16 +1272,35 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	now := time.Now()
 	if resource == nil {
 		resource = &models.Resource{
-			InfoHash:       infoHash,
-			LocalStatus:    models.LocalStatusNotDownloaded,
-			DownloadStatus: models.JobStatusDownloadMetaInfo,
-			LocalPath:      m.currentDownloadDir(),
-			CreateTime:     &now,
-			UpdateTime:     &now,
+			InfoHash:     infoHash,
+			Kind:         models.KindTorrent,
+			TaskState:    models.TaskDiscovered,
+			LocalState:   models.LocalNone,
+			LocalPath:    m.currentDownloadDir(),
+			MaxAttempts:  uint16(m.downloadCfg.MaxRetries),
+			CreateTime:   &now,
+			UpdateTime:   &now,
+			StateVersion: 0,
 		}
-	} else if resource.DownloadStatus == models.JobStatusCompleted || resource.LocalStatus == models.LocalStatusExists {
-		// 已完成或本地已存在，无需重复下载
+	} else if resource.Kind == models.KindLocal {
+		// 本地视频不进入下载流程
 		return infoHash, false, nil
+	} else if resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent {
+		// 已完成且本地文件齐全，无需重复下载
+		return infoHash, false, nil
+	} else if resource.TaskState.Active() {
+		// 已有任务在活跃流程中，避免重复挂载
+		return infoHash, false, nil
+	} else if e == models.EvAddDownload {
+		switch resource.TaskState {
+		case models.TaskFailed:
+			e = models.EvManualRetry
+		case models.TaskCancelled:
+			e = models.EvRedownload
+		case models.TaskDiscovered:
+		default:
+			return infoHash, false, nil
+		}
 	}
 
 	// 有元信息缓存时直接按缓存恢复任务，重启后无需重新等待 DHT / peer 拉取元信息。
@@ -1021,38 +1317,73 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 		}
 	}
 
+	return m.startJob(resource, spec, magnet, torrentPath, priority, e)
+}
+
+// startJob 在资源记录上应用入队事件、落库并挂载 Torrent。
+func (m *TorrentManager) startJob(resource *models.Resource, spec *torrent.TorrentSpec, magnet, torrentPath string, priority int, e models.Event) (string, bool, error) {
+	if resource == nil || spec == nil {
+		return "", false, errors.New(ErrKeyInvalidMagnet)
+	}
+	now := time.Now()
+
+	resource.Kind = models.KindTorrent
+	if resource.MaxAttempts == 0 {
+		resource.MaxAttempts = uint16(m.downloadCfg.MaxRetries)
+	}
+	if resource.CreateTime == nil {
+		resource.CreateTime = &now
+	}
+	if resource.LocalPath == "" {
+		resource.LocalPath = m.currentDownloadDir()
+	}
+	if resource.Priority == nil || *resource.Priority < priority {
+		resource.Priority = &priority
+	}
 	if magnet != "" && (resource.SourceURL == nil || strings.TrimSpace(*resource.SourceURL) == "") {
 		resource.SourceURL = &magnet
 	}
 	if torrentPath != "" {
 		resource.TorrentPath = &torrentPath
 	}
-	if resource.LocalPath == "" {
-		resource.LocalPath = m.currentDownloadDir()
+
+	fromVersion := resource.StateVersion
+	if _, err := resource.ApplyEvent(e, models.EventPayload{Now: now, SourceAvailable: true}); err != nil {
+		return resource.InfoHash, false, err
 	}
-	if resource.CreateTime == nil {
-		resource.CreateTime = &now
+	if resource.InfoHash == "" {
+		resource.InfoHash = spec.InfoHash.HexString()
 	}
-	if resource.Priority == nil || *resource.Priority < priority {
-		resource.Priority = &priority
-	}
-	resource.LocalStatus = models.LocalStatusNotDownloaded
-	resource.DownloadStatus = models.JobStatusDownloadMetaInfo
-	resource.ErrorMessage = nil
-	retry := 0
-	resource.RetryCount = &retry
-	maxRetries := m.downloadCfg.MaxRetries
-	resource.MateRetryCount = &maxRetries
 	resource.UpdateTime = &now
 
-	if err := m.ResourceDao.Save(resource); err != nil {
-		return infoHash, false, err
+	if resource.ID == 0 {
+		if err := m.ResourceDao.Save(resource); err != nil {
+			return resource.InfoHash, false, err
+		}
+	} else {
+		if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
+			return resource.InfoHash, false, err
+		}
 	}
 
+	job := m.newJob(resource, magnet, torrentPath)
+	m.mu.Lock()
+	m.jobsMap[resource.InfoHash] = job
+	m.mu.Unlock()
+	if err := m.attachTorrent(job, spec); err != nil {
+		m.markJobAttachFailed(job, classifyTorrentError(err))
+		return resource.InfoHash, false, fmt.Errorf("%s: %w", classifyTorrentError(err), err)
+	}
+	m.emitState(job)
+	go m.waitMetadata(job)
+	return resource.InfoHash, true, nil
+}
+
+// newJob 创建并绑定任务运行参数。
+func (m *TorrentManager) newJob(resource *models.Resource, magnet, torrentPath string) *TorrentJob {
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &TorrentJob{
 		job:           resource,
-		Status:        models.JobStatusDownloadMetaInfo,
 		priorityIndex: -1, // -1代表不指定特定文件，全部下载；>=0才指定文件索引
 		magnet:        magnet,
 		torrentPath:   torrentPath,
@@ -1061,18 +1392,95 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	}
 	job.bind(m.downloadCfg, func(payload *vo.TorrentJobVO) {
 		emitDownloadEvent(EventDownloadProgress, payload)
-	}, m.persistResource)
+	}, m.persistSnapshot, m.clearPieces)
+	return job
+}
 
-	m.mu.Lock()
-	m.jobsMap[infoHash] = job
-	m.mu.Unlock()
-	if err := m.attachTorrent(job, spec); err != nil {
-		m.markFailed(job, classifyTorrentError(err))
-		return infoHash, false, fmt.Errorf("%s: %w", classifyTorrentError(err), err)
+// markJobAttachFailed 挂载失败时按状态决定进入重试等待或标记失败。
+func (m *TorrentManager) markJobAttachFailed(job *TorrentJob, errorKey string) {
+	if job == nil {
+		return
 	}
-	m.emitState(job)
-	go m.waitMetadata(job)
-	return infoHash, true, nil
+	state := job.currentState()
+	if state != models.TaskPreparing {
+		return
+	}
+	now := time.Now()
+	attempt := job.attempt() + 1
+	var p = models.EventPayload{
+		Now:       now,
+		Attempt:   attempt,
+		ErrorCode: errorKey,
+	}
+	if attempt < job.maxAttempts() {
+		next := now.Add(m.downloadCfg.RetryDelay)
+		p.NextRetryAt = &next
+	}
+	if _, err := job.Apply(models.EvAttachFail, p); err != nil {
+		logger.Torrent.Warn("挂载失败流转被拒绝", slog.String("info_hash", job.infoHash()), slog.Any("err", err))
+	}
+	if job.currentState() == models.TaskRetryWait {
+		m.waitRetryAfterAttachFail(job)
+	}
+}
+
+// waitRetryAfterAttachFail 挂载失败后的等待重试。
+func (m *TorrentManager) waitRetryAfterAttachFail(job *TorrentJob) {
+	ctx := job.getContext()
+	delay := m.downloadCfg.RetryDelay
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if job.currentState() != models.TaskRetryWait {
+			return
+		}
+		if _, err := job.Apply(models.EvRetryDelayElapsed, models.EventPayload{Now: time.Now()}); err != nil {
+			return
+		}
+		job.resetContext()
+		if err := m.restartTorrent(job); err != nil {
+			m.markJobAttachFailed(job, classifyTorrentError(err))
+			return
+		}
+		go m.waitMetadata(job)
+	}()
+}
+
+// clearPieces 清理任务的分片完成记录，避免校验失败后重试直接沿用过期的完成标记。
+func (m *TorrentManager) clearPieces(job *TorrentJob) {
+	if job == nil {
+		return
+	}
+	tt := job.getTorrent()
+	if tt == nil || tt.Info() == nil {
+		return
+	}
+	baseDir := job.saveDir()
+	if baseDir == "" {
+		baseDir = m.currentDownloadDir()
+	}
+	pc, err := m.pieceCompletionForDir(baseDir)
+	if err != nil {
+		logger.Torrent.Warn("打开分片完成记录失败", slog.String("info_hash", job.infoHash()), slog.Any("err", err))
+		return
+	}
+
+	info := tt.Info()
+	infoHash := tt.InfoHash()
+	for i := 0; i < info.NumPieces(); i++ {
+		key := metainfo.PieceKey{InfoHash: infoHash, Index: i}
+		if err := pc.Set(key, g.None[bool]()); err != nil {
+			logger.Torrent.Warn("清理分片完成记录失败",
+				slog.String("info_hash", job.infoHash()),
+				slog.Int("piece", i),
+				slog.Any("err", err),
+			)
+			return
+		}
+	}
 }
 
 // metadataCacheDir 下载目录下缓存种子元信息的子目录名。
@@ -1236,6 +1644,57 @@ func (job *TorrentJob) saveDir() string {
 	return job.job.LocalPath
 }
 
+// id 返回资源主键。
+func (job *TorrentJob) id() int64 {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.job == nil {
+		return 0
+	}
+	return job.job.ID
+}
+
+// attempt 返回当前连续失败次数。
+func (job *TorrentJob) attempt() uint16 {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.job == nil {
+		return 0
+	}
+	return job.job.Attempt
+}
+
+// maxAttempts 返回自动重试上限，缺省按 3 次。
+func (job *TorrentJob) maxAttempts() uint16 {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.job == nil || job.job.MaxAttempts == 0 {
+		return 3
+	}
+	return job.job.MaxAttempts
+}
+
+// sourceAvailable 判断任务是否具备可解析的下载来源。
+func (job *TorrentJob) sourceAvailable() bool {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return sourceAvailable(job.job)
+}
+
+// sourceAvailable 判断资源记录是否具备可解析的下载来源。
+func sourceAvailable(resource *models.Resource) bool {
+	if resource == nil {
+		return false
+	}
+	if resource.InfoHash != "" {
+		return true
+	}
+	if resource.SourceURL != nil && strings.TrimSpace(*resource.SourceURL) != "" {
+		return true
+	}
+	return resource.TorrentPath != nil && strings.TrimSpace(*resource.TorrentPath) != ""
+}
+
 // ErrorKey 提取错误中的语言包 key，供上层（Service / 前端）翻译错误提示。
 func ErrorKey(err error) string {
 	return errorKeyOf(err)
@@ -1259,6 +1718,11 @@ func errorKeyOf(err error) string {
 		ErrKeyNoSpace,
 		ErrKeyResourceGone,
 		ErrKeyNetwork,
+		ErrKeyIntegrity,
+		ErrKeyCancelTooLate,
+		ErrKeyInvalidTransition,
+		ErrKeyRepairNotNeeded,
+		ErrKeyDeleteNotAllowed,
 	} {
 		if strings.Contains(message, key) {
 			return key

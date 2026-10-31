@@ -20,13 +20,19 @@ type CrawledResourceQuery struct {
 
 // CrawledResourceItem 列表中的单条爬取资源。
 type CrawledResourceItem struct {
-	ID             int64  `json:"id"`
-	Name           string `json:"name"`
-	InfoHash       string `json:"infoHash"`
-	SourceURL      string `json:"sourceUrl"`
-	TotalSize      int64  `json:"totalSize"`
-	LocalStatus    string `json:"localStatus"`
-	DownloadStatus string `json:"downloadStatus"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	InfoHash  string `json:"infoHash"`
+	SourceURL string `json:"sourceUrl"`
+	TotalSize int64  `json:"totalSize"`
+	// Kind 资源来源类型：torrent / local。
+	Kind string `json:"kind"`
+	// TaskState 下载任务生命周期状态。
+	TaskState string `json:"taskState"`
+	// LocalState 本地文件可用性状态。
+	LocalState string `json:"localState"`
+	// DisplayState 前端展示态，由后端派生。
+	DisplayState string `json:"displayState"`
 	// CreatedTime 爬取时间，格式固定为 2006-01-02 15:04:05，避免前端再做时区处理。
 	CreatedTime string `json:"createdTime"`
 }
@@ -110,10 +116,12 @@ func (s *ResourceService) ListCrawled(query CrawledResourceQuery) (*CrawledResou
 // toCrawledResourceItem 把数据库实体转换成前端展示用的条目。
 func toCrawledResourceItem(resource *models.Resource) CrawledResourceItem {
 	item := CrawledResourceItem{
-		ID:             resource.ID,
-		InfoHash:       resource.InfoHash,
-		LocalStatus:    string(resource.LocalStatus),
-		DownloadStatus: string(resource.DownloadStatus),
+		ID:           resource.ID,
+		InfoHash:     resource.InfoHash,
+		Kind:         resource.Kind.String(),
+		TaskState:    resource.TaskState.String(),
+		LocalState:   resource.LocalState.String(),
+		DisplayState: resource.Display().String(),
 	}
 
 	if resource.ResourceName != nil {

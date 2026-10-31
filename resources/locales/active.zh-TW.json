@@ -210,27 +210,11 @@
     "description": "種子資源清單 - 載入失敗提示",
     "other": "載入資源清單失敗"
   },
-  "resources.status.not_downloaded": {
+  "resources.status.undownloaded": {
     "description": "種子資源清單 - 狀態：未下載",
     "other": "未下載"
   },
-  "resources.status.exists": {
-    "description": "種子資源清單 - 狀態：本機已存在",
-    "other": "本機已存在"
-  },
-  "resources.status.missing": {
-    "description": "種子資源清單 - 狀態：本機檔案遺失",
-    "other": "檔案遺失"
-  },
-  "resources.status.corrupted": {
-    "description": "種子資源清單 - 狀態：檔案損毀",
-    "other": "檔案損毀"
-  },
-  "resources.status.deleted": {
-    "description": "種子資源清單 - 狀態：檔案已刪除",
-    "other": "檔案已刪除"
-  },
-  "resources.status.download_meta_info": {
+  "resources.status.fetching_meta": {
     "description": "種子資源清單 - 狀態：取得中繼資訊",
     "other": "取得中繼資訊"
   },
@@ -246,6 +230,14 @@
     "description": "種子資源清單 - 狀態：已暫停",
     "other": "已暫停"
   },
+  "resources.status.verifying": {
+    "description": "種子資源清單 - 狀態：校驗中",
+    "other": "校驗中"
+  },
+  "resources.status.retrying": {
+    "description": "種子資源清單 - 狀態：等待重試",
+    "other": "等待重試"
+  },
   "resources.status.completed": {
     "description": "種子資源清單 - 狀態：已完成",
     "other": "已完成"
@@ -257,6 +249,22 @@
   "resources.status.cancelled": {
     "description": "種子資源清單 - 狀態：已取消",
     "other": "已取消"
+  },
+  "resources.status.file_lost": {
+    "description": "種子資源清單 - 狀態：檔案遺失",
+    "other": "檔案遺失"
+  },
+  "resources.status.corrupted": {
+    "description": "種子資源清單 - 狀態：檔案損毀",
+    "other": "檔案損毀"
+  },
+  "resources.status.local_ready": {
+    "description": "種子資源清單 - 狀態：本機可用",
+    "other": "本機可用"
+  },
+  "resources.status.local_lost": {
+    "description": "種子資源清單 - 狀態：本機檔案遺失",
+    "other": "本機檔案遺失"
   },
   "resources.status.unknown": {
     "description": "種子資源清單 - 狀態：未知",
@@ -400,6 +408,10 @@
     "description": "下載中心 - 按鈕：取消",
     "other": "取消任務"
   },
+  "download.action.repair": {
+    "description": "下載中心 - 按鈕：修復檔案遺失",
+    "other": "修復"
+  },
   "download.action.priority_up": {
     "description": "下載中心 - 按鈕：提高優先順序",
     "other": "提高優先順序"
@@ -459,6 +471,26 @@
   "download.error.network": {
     "description": "下載錯誤 - 網路異常",
     "other": "網路連線異常，正在自動重試"
+  },
+  "download.error.integrity": {
+    "description": "下載錯誤 - 檔案校驗失敗",
+    "other": "檔案校驗失敗，將重新下載"
+  },
+  "download.error.cancel_too_late": {
+    "description": "下載錯誤 - 校驗階段無法取消",
+    "other": "任務正在校驗中，暫時無法取消"
+  },
+  "download.error.invalid_transition": {
+    "description": "下載錯誤 - 目前狀態不支援該操作",
+    "other": "目前狀態不支援該操作"
+  },
+  "download.error.repair_not_needed": {
+    "description": "下載錯誤 - 無需修復",
+    "other": "該任務已完成，無需修復"
+  },
+  "download.error.delete_not_allowed": {
+    "description": "下載錯誤 - 不允許刪除",
+    "other": "目前狀態不允許刪除"
   },
 
   "settings.title": {

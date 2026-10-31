@@ -3,6 +3,7 @@ package torrentmgr
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,11 +38,9 @@ func isVideoPath(path string) bool {
 type TorrentJob struct {
 	torrent       *torrent.Torrent // anacrolix/torrent内存种子句柄，管理peer、分片、下载运行状态，仅内存有效
 	job           *models.Resource // 数据库持久化任务模型，保存任务配置、infohash、保存路径等落库信息
-	retries       int              // 任务失败重试计数，到达阈值标记任务失败
 	priorityIndex int              // 流式下载目标文件索引；>=0优先下载指定序号文件用于边下边播
 	magnet        string           // 原始磁力链接，用于失败后重新拉取元信息
 	torrentPath   string           // 本地 .torrent 文件路径，与 magnet 二选一
-	errorKey      string           // 最近一次失败原因的 i18n key
 
 	lastBytes     int64     // 上一次测速采样时刻的累计已下载字节，速度计算基准快照
 	lastUpload    int64     // 上一次测速采样时刻的累计已上传字节，上传速度计算基准快照
@@ -60,17 +59,26 @@ type TorrentJob struct {
 	persistInterval  time.Duration // 进度落库间隔
 	stallTimeout     time.Duration // 无进展判定超时
 
-	notify  func(*vo.TorrentJobVO) // 进度 / 完成时推送事件
-	persist func(*models.Resource) // 把进度快照写入数据库
+	notify      func(*vo.TorrentJobVO)              // 进度 / 完成时推送事件
+	persist     func(*models.Resource, uint64) bool // CAS 落库快照，返回是否写入成功
+	clearPieces func(*TorrentJob)                   // 清理该任务的分片完成记录
 
-	Status models.JobStatus
+	// persistedVersion 最近一次成功写入数据库的 state_version。
+	// 仅当 CAS 写入成功后才推进，保证陈旧快照不会覆盖更新的状态。
+	persistedVersion uint64
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	mu     sync.RWMutex
 }
 
 // bind 注入运行参数与回调，由管理人在创建任务时调用。
-func (job *TorrentJob) bind(cfg DownloadConfig, notify func(*vo.TorrentJobVO), persist func(*models.Resource)) {
+func (job *TorrentJob) bind(
+	cfg DownloadConfig,
+	notify func(*vo.TorrentJobVO),
+	persist func(*models.Resource, uint64) bool,
+	clearPieces func(*TorrentJob),
+) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 
@@ -79,6 +87,61 @@ func (job *TorrentJob) bind(cfg DownloadConfig, notify func(*vo.TorrentJobVO), p
 	job.stallTimeout = cfg.StallTimeout
 	job.notify = notify
 	job.persist = persist
+	job.clearPieces = clearPieces
+	job.persistedVersion = job.job.StateVersion
+}
+
+// Apply 在任务上执行一次状态机流转，并按规则完成落库 / 推送 / 释放资源等副作用。
+func (job *TorrentJob) Apply(e models.Event, p models.EventPayload) (models.Result, error) {
+	return job.apply(e, p)
+}
+
+// apply 执行流转的内部实现；调用方不得持有任务锁。
+func (job *TorrentJob) apply(e models.Event, p models.EventPayload) (models.Result, error) {
+	job.mu.Lock()
+	if job.job == nil {
+		job.mu.Unlock()
+		return models.Result{}, models.ErrInvalidTransition
+	}
+	if p.Now.IsZero() {
+		p.Now = time.Now()
+	}
+	res, err := job.job.ApplyEvent(e, p)
+	if err != nil {
+		job.mu.Unlock()
+		return res, err
+	}
+
+	now := p.Now
+	job.job.UpdateTime = &now
+
+	fromVersion := job.persistedVersion
+	var snapshot *models.Resource
+	if res.Effects&models.EffectPersist != 0 {
+		snapshot = job.snapshotResourceLocked()
+	}
+	var payload *vo.TorrentJobVO
+	if res.Effects&models.EffectEmit != 0 {
+		payload = job.voLocked(now)
+	}
+	tt := job.torrent
+	cancel := job.cancel
+	job.mu.Unlock()
+
+	if snapshot != nil {
+		job.saveSnapshot(snapshot, fromVersion)
+	}
+	if res.Effects&models.EffectClearPieces != 0 && job.clearPieces != nil {
+		job.clearPieces(job)
+	}
+	if res.Effects&models.EffectStopContext != 0 && cancel != nil {
+		cancel()
+	}
+	if res.Effects&models.EffectDropTorrent != 0 && tt != nil {
+		tt.Drop()
+	}
+	job.push(payload)
+	return res, nil
 }
 
 // StartDownload 执行下载并阻塞到任务结束，返回结束原因。
@@ -90,11 +153,11 @@ func (job *TorrentJob) bind(cfg DownloadConfig, notify func(*vo.TorrentJobVO), p
 //   - outcomeStalled：长时间无下载进展，需要上层自动重试
 func (job *TorrentJob) StartDownload() jobOutcome {
 	job.mu.Lock()
-	status := job.Status
+	state := job.job.TaskState
 	tt := job.torrent
-	if status != models.JobStatusQueued && status != models.JobStatusDownloading {
+	if state != models.TaskQueued && state != models.TaskDownloading {
 		job.mu.Unlock()
-		if status == models.JobStatusPaused {
+		if state == models.TaskPaused {
 			return outcomePaused
 		}
 		return outcomeCancelled
@@ -105,8 +168,6 @@ func (job *TorrentJob) StartDownload() jobOutcome {
 	}
 
 	now := time.Now()
-	job.Status = models.JobStatusDownloading
-	job.job.DownloadStatus = models.JobStatusDownloading
 	job.lastProgress = now
 	job.lastSpeedAt = now
 	job.lastPersistAt = now
@@ -136,10 +197,7 @@ func (job *TorrentJob) StartDownload() jobOutcome {
 				return outcomeStalled
 			}
 		case <-job.ctx.Done():
-			job.mu.RLock()
-			status := job.Status
-			job.mu.RUnlock()
-			if status == models.JobStatusPaused {
+			if job.currentState() == models.TaskPaused {
 				return outcomePaused
 			}
 			return outcomeCancelled
@@ -150,7 +208,7 @@ func (job *TorrentJob) StartDownload() jobOutcome {
 	}
 }
 
-// monitorProgress 采样一次进度并推送事件，返回 true 表示任务已停滞需要重试。
+// monitorProgress 采样一次进度、推送事件并按落库间隔持久化，返回 true 表示任务已停滞需要重试。
 func (job *TorrentJob) monitorProgress() bool {
 	job.mu.Lock()
 
@@ -201,7 +259,6 @@ func (job *TorrentJob) monitorProgress() bool {
 
 	job.job.TotalSize = &total
 	job.job.DownloadedSize = &completed
-	job.job.UpdateTime = &now
 
 	if completed > job.lastCompleted {
 		job.lastCompleted = completed
@@ -209,20 +266,23 @@ func (job *TorrentJob) monitorProgress() bool {
 	}
 	stalled := completed < total && job.stallTimeout > 0 && now.Sub(job.lastProgress) >= job.stallTimeout
 
+	shouldPersist := job.persist != nil && job.persistInterval > 0 && now.Sub(job.lastPersistAt) >= job.persistInterval
+	if shouldPersist {
+		job.lastPersistAt = now
+	}
 	infoHash := job.job.InfoHash
 	progress := job.progress
 	speed := job.downloadSpeed
 	upload := job.uploadSpeed
 	peers := stats.ActivePeers
-
-	snapshot := job.persistSnapshotLocked(now)
-	payload := job.voLocked(now)
 	job.mu.Unlock()
 
-	if snapshot != nil {
-		job.saveSnapshot(snapshot)
+	if shouldPersist && !stalled {
+		// 进度快照不推进状态版本；CAS 失败即视为陈旧快照丢弃。
+		job.apply(models.EvProgress, models.EventPayload{Now: now})
 	}
-	job.push(payload)
+
+	job.push(job.ToVO())
 
 	logger.Torrent.Debug(fmt.Sprintf(
 		infoHash+"进度: %.2f%% | 已完成: %.2f MB | 下载速度: %.2f MB/s | 上传速度: %.2f MB/s | Peer: %d\n",
@@ -236,77 +296,81 @@ func (job *TorrentJob) monitorProgress() bool {
 	return stalled
 }
 
-// markCompleted 标记任务完成：校验文件完整性、持久化并推送最终进度。
+// markCompleted 标记下载完成并校验落盘结果。
 // 分片哈希在下载过程中已由 torrent 引擎校验，这里再确认文件确实完整落盘。
 func (job *TorrentJob) markCompleted(now time.Time) {
-	job.mu.Lock()
-	if job.Status == models.JobStatusCancelled || job.Status == models.JobStatusPaused {
-		job.mu.Unlock()
+	if job.currentState() != models.TaskDownloading {
 		return
 	}
 
 	total := int64(0)
 	completed := int64(0)
-	if job.torrent != nil {
-		if info := job.torrent.Info(); info != nil {
+	if tt := job.getTorrent(); tt != nil {
+		if info := tt.Info(); info != nil {
 			total = info.TotalLength()
 		}
-		completed = job.torrent.BytesCompleted()
+		completed = tt.BytesCompleted()
 	}
-	if total <= 0 && job.job.TotalSize != nil {
-		total = *job.job.TotalSize
+	if total <= 0 {
+		job.mu.Lock()
+		if job.job.TotalSize != nil {
+			total = *job.job.TotalSize
+		}
+		job.mu.Unlock()
 	}
 	if completed < total {
 		completed = total
 	}
 
-	baseDir := job.job.LocalPath
-	check := verifyCompletedFiles(job.torrent, baseDir)
-
-	status := models.JobStatusCompleted
-	localStatus := models.LocalStatusExists
-	errorKey := ""
-	switch {
-	case check.missing:
-		status = models.JobStatusFailed
-		localStatus = models.LocalStatusMissing
-		errorKey = ErrKeyResourceGone
-	case check.mismatch:
-		status = models.JobStatusFailed
-		localStatus = models.LocalStatusCorrupted
-		errorKey = ErrKeyResourceGone
-	}
-
-	job.Status = status
+	job.mu.Lock()
 	job.progress = 100
 	job.etaSeconds = 0
 	job.downloaded = completed
-	job.errorKey = errorKey
-	job.job.DownloadStatus = status
+	if total > 0 {
+		job.job.TotalSize = &total
+	}
 	job.job.DownloadedSize = &completed
-	job.job.LocalStatus = localStatus
-	job.job.UpdateTime = &now
+	baseDir := job.job.LocalPath
+	job.mu.Unlock()
 
+	// 下载完成：Downloading -> Verifying。
+	if _, err := job.apply(models.EvDownloadComplete, models.EventPayload{Now: now}); err != nil {
+		logger.Torrent.Warn("下载完成流转失败",
+			slog.String("info_hash", job.infoHash()),
+			slog.Any("err", err),
+		)
+		return
+	}
+
+	check := verifyCompletedFiles(job.getTorrent(), baseDir)
+
+	job.mu.Lock()
 	if check.fileName != "" && job.job.FileName == nil {
 		job.job.FileName = &check.fileName
 	}
 	if check.fileSize > 0 {
 		job.job.FileSize = &check.fileSize
 	}
-
-	if errorKey != "" {
-		job.job.ErrorMessage = &errorKey
-	} else {
-		job.job.ErrorMessage = nil
-		job.job.CompletedTime = &now
-	}
-
-	snapshot := job.snapshotResourceLocked()
-	payload := job.voLocked(now)
+	job.job.UpdateTime = &now
 	job.mu.Unlock()
 
-	job.saveSnapshot(snapshot)
-	job.push(payload)
+	// 校验结果：Verifying -> Completed / Failed。
+	switch {
+	case check.missing:
+		job.apply(models.EvVerifyMissing, models.EventPayload{
+			Now:        now,
+			ErrorCode:  ErrKeyIntegrity,
+			LossReason: models.LossNotFound,
+		})
+	case check.mismatch:
+		job.apply(models.EvVerifyCorrupted, models.EventPayload{
+			Now:        now,
+			ErrorCode:  ErrKeyIntegrity,
+			LossReason: models.LossSizeMismatch,
+		})
+	default:
+		job.apply(models.EvVerifyOK, models.EventPayload{Now: now})
+	}
 }
 
 // completionCheck 下载完成后的落盘校验结果。
@@ -344,6 +408,7 @@ func verifyCompletedFiles(tt *torrent.Torrent, baseDir string) completionCheck {
 		if isVideoPath(file.Path()) && file.Length() > check.fileSize {
 			check.fileName = filepath.Base(file.Path())
 			check.fileSize = file.Length()
+			continue
 		}
 	}
 
@@ -351,52 +416,20 @@ func verifyCompletedFiles(tt *torrent.Torrent, baseDir string) completionCheck {
 }
 
 // Pause 暂停任务：停止数据下载并结束当前下载 goroutine，但保留 Torrent 句柄用于继续。
-func (job *TorrentJob) Pause() {
-	job.mu.Lock()
-	switch job.Status {
-	case models.JobStatusDownloadMetaInfo, models.JobStatusQueued, models.JobStatusDownloading:
-	default:
-		job.mu.Unlock()
-		return
+func (job *TorrentJob) Pause() error {
+	if _, err := job.apply(models.EvPause, models.EventPayload{Now: time.Now()}); err != nil {
+		return err
 	}
-
-	job.Status = models.JobStatusPaused
-	job.job.DownloadStatus = models.JobStatusPaused
-	now := time.Now()
-	job.job.UpdateTime = &now
-	tt := job.torrent
-	cancel := job.cancel
-	job.mu.Unlock()
-
-	if tt != nil {
+	if tt := job.getTorrent(); tt != nil {
 		tt.DisallowDataDownload()
 	}
-	if cancel != nil {
-		cancel()
-	}
+	return nil
 }
 
 // Cancel 取消任务：标记取消、终止 goroutine 并释放 Torrent。
-func (job *TorrentJob) Cancel() {
-	job.mu.Lock()
-	if job.Status == models.JobStatusCompleted {
-		job.mu.Unlock()
-		return
-	}
-	job.Status = models.JobStatusCancelled
-	job.job.DownloadStatus = models.JobStatusCancelled
-	now := time.Now()
-	job.job.UpdateTime = &now
-	tt := job.torrent
-	cancel := job.cancel
-	job.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
-	}
-	if tt != nil {
-		tt.Drop()
-	}
+func (job *TorrentJob) Cancel() error {
+	_, err := job.apply(models.EvCancel, models.EventPayload{Now: time.Now()})
+	return err
 }
 
 // shutdown 应用退出时终止任务 goroutine，不做状态落库。
@@ -444,47 +477,13 @@ func (job *TorrentJob) getContext() context.Context {
 	return job.ctx
 }
 
-// setStatus 更新任务状态与持久化状态。
-func (job *TorrentJob) setStatus(status models.JobStatus) {
-	job.mu.Lock()
-	job.Status = status
-	job.job.DownloadStatus = status
-	now := time.Now()
-	job.job.UpdateTime = &now
-	job.mu.Unlock()
+// metadataReady 判断元信息是否已就绪。
+func (job *TorrentJob) metadataReady() bool {
+	tt := job.getTorrent()
+	return tt != nil && tt.Info() != nil
 }
 
-// resetForRetry 把任务重置为"重新获取元信息"状态，并清空错误信息与重试次数。
-func (job *TorrentJob) resetForRetry() {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-
-	job.retries = 0
-	retry := 0
-	job.errorKey = ""
-	job.job.RetryCount = &retry
-	job.job.ErrorMessage = nil
-	job.Status = models.JobStatusDownloadMetaInfo
-	job.job.DownloadStatus = models.JobStatusDownloadMetaInfo
-	now := time.Now()
-	job.job.UpdateTime = &now
-}
-
-// setFailureState 在重试 / 失败时记录错误原因与次数。
-func (job *TorrentJob) setFailureState(status models.JobStatus, errorKey string, retries int) {
-	job.mu.Lock()
-	job.Status = status
-	job.job.DownloadStatus = status
-	job.retries = retries
-	job.errorKey = errorKey
-	job.job.RetryCount = &retries
-	job.job.ErrorMessage = &errorKey
-	now := time.Now()
-	job.job.UpdateTime = &now
-	job.mu.Unlock()
-}
-
-// setPriority 更新任务优先级，返回是否发生变化。
+// setPriority 提升任务优先级，返回是否发生变化；不允许降低。
 func (job *TorrentJob) setPriority(priority int) bool {
 	job.mu.Lock()
 	defer job.mu.Unlock()
@@ -506,10 +505,7 @@ func (job *TorrentJob) setPriority(priority int) bool {
 func (job *TorrentJob) priorityValue() int {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
-	if job.job.Priority == nil {
-		return 0
-	}
-	return *job.job.Priority
+	return job.priorityValueLocked()
 }
 
 // forcePriority 直接设置任务优先级，允许提高或降低，返回是否发生变化。
@@ -536,27 +532,39 @@ func (job *TorrentJob) createTimeValue() time.Time {
 	return *job.job.CreateTime
 }
 
-// currentStatus 返回当前状态，供调度器读取。
-func (job *TorrentJob) currentStatus() models.JobStatus {
+// currentState 返回当前任务状态，供调度器读取。
+func (job *TorrentJob) currentState() models.TaskState {
 	job.mu.RLock()
 	defer job.mu.RUnlock()
-	return job.Status
+	return job.job.TaskState
 }
 
-// CurrentStatus 返回任务当前状态，供外部（如视频播放）判断是否可读取数据。
-func (job *TorrentJob) CurrentStatus() models.JobStatus {
-	return job.currentStatus()
+// CurrentState 返回任务当前状态，供外部（如视频播放）判断是否可读取数据。
+func (job *TorrentJob) CurrentState() models.TaskState {
+	return job.currentState()
 }
 
-// persistSnapshotLocked 到达落库间隔时返回资源快照；调用方需持有写锁。
-func (job *TorrentJob) persistSnapshotLocked(now time.Time) *models.Resource {
-	if job.persist == nil || job.persistInterval <= 0 {
-		return nil
+// CurrentLocalState 返回本地文件可用性状态。
+func (job *TorrentJob) CurrentLocalState() models.LocalState {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	return job.job.LocalState
+}
+
+// infoHash 返回任务 InfoHash。
+func (job *TorrentJob) infoHash() string {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
+	if job.job == nil {
+		return ""
 	}
-	if now.Sub(job.lastPersistAt) < job.persistInterval {
-		return nil
-	}
-	job.lastPersistAt = now
+	return job.job.InfoHash
+}
+
+// snapshotResource 对外提供资源快照。
+func (job *TorrentJob) snapshotResource() *models.Resource {
+	job.mu.RLock()
+	defer job.mu.RUnlock()
 	return job.snapshotResourceLocked()
 }
 
@@ -569,19 +577,27 @@ func (job *TorrentJob) snapshotResourceLocked() *models.Resource {
 	return &cp
 }
 
-// snapshotResource 对外提供资源快照。
-func (job *TorrentJob) snapshotResource() *models.Resource {
-	job.mu.RLock()
-	defer job.mu.RUnlock()
-	return job.snapshotResourceLocked()
+// saveSnapshot 以 CAS 方式写入数据库，失败只记录日志，不阻断下载。
+func (job *TorrentJob) saveSnapshot(resource *models.Resource, fromVersion uint64) bool {
+	if resource == nil || job.persist == nil {
+		return false
+	}
+	ok := job.persist(resource, fromVersion)
+	if ok {
+		job.mu.Lock()
+		if resource.StateVersion > job.persistedVersion {
+			job.persistedVersion = resource.StateVersion
+		}
+		job.mu.Unlock()
+	}
+	return ok
 }
 
-// saveSnapshot 把快照写入数据库，失败只记录日志，不阻断下载。
-func (job *TorrentJob) saveSnapshot(resource *models.Resource) {
-	if resource == nil || job.persist == nil {
-		return
-	}
-	job.persist(resource)
+// syncPersistedVersion 在 CAS 失败后同步数据库中的最新版本，避免后续写入持续冲突。
+func (job *TorrentJob) syncPersistedVersion(version uint64) {
+	job.mu.Lock()
+	job.persistedVersion = version
+	job.mu.Unlock()
 }
 
 // push 推送任务快照事件。
@@ -602,31 +618,28 @@ func (job *TorrentJob) ToVO() *vo.TorrentJobVO {
 // voLocked 生成任务快照；调用方需持有读/写锁。
 func (job *TorrentJob) voLocked(now time.Time) *vo.TorrentJobVO {
 	payload := &vo.TorrentJobVO{
-		Status:        job.Status,
 		Progress:      job.progress,
 		Downloaded:    job.downloaded,
 		DownloadSpeed: job.downloadSpeed,
 		UploadSpeed:   job.uploadSpeed,
 		EtaSeconds:    job.etaSeconds,
 		Priority:      job.priorityValueLocked(),
-		RetryCount:    job.retries,
-		ErrorMessage:  job.errorKey,
 	}
 
 	if job.job != nil {
 		payload.InfoHash = job.job.InfoHash
+		payload.TaskState = job.job.TaskState.String()
+		payload.LocalState = job.job.LocalState.String()
+		payload.DisplayState = job.job.Display().String()
 		payload.SavePath = job.job.LocalPath
+		payload.Attempt = int(job.job.Attempt)
+		payload.MaxAttempts = int(job.job.MaxAttempts)
+		payload.ErrorCode = job.job.ErrorCode
 		if job.job.ResourceName != nil {
 			payload.Name = *job.job.ResourceName
 		}
 		if job.job.FileName != nil {
 			payload.FileName = *job.job.FileName
-		}
-		if job.job.RetryCount != nil {
-			payload.RetryCount = *job.job.RetryCount
-		}
-		if job.job.ErrorMessage != nil && payload.ErrorMessage == "" {
-			payload.ErrorMessage = *job.job.ErrorMessage
 		}
 		if job.job.TotalSize != nil {
 			payload.TotalSize = *job.job.TotalSize
@@ -637,8 +650,11 @@ func (job *TorrentJob) voLocked(now time.Time) *vo.TorrentJobVO {
 		if job.job.CreateTime != nil {
 			payload.CreatedTime = job.job.CreateTime.Format(time.DateTime)
 		}
-		if job.job.CompletedTime != nil {
-			payload.CompletedTime = job.job.CompletedTime.Format(time.DateTime)
+		if job.job.VerifiedAt != nil {
+			payload.VerifiedAt = job.job.VerifiedAt.Format(time.DateTime)
+		}
+		if job.job.NextRetryAt != nil {
+			payload.NextRetryAt = job.job.NextRetryAt.Format(time.DateTime)
 		}
 	}
 
@@ -667,7 +683,7 @@ func (job *TorrentJob) voLocked(now time.Time) *vo.TorrentJobVO {
 		payload.EtaSeconds = estimateSeconds(payload.TotalSize-payload.Downloaded, payload.DownloadSpeed)
 	}
 
-	if payload.Status == models.JobStatusCompleted {
+	if job.job != nil && job.job.TaskState == models.TaskCompleted {
 		payload.Progress = 100
 		payload.EtaSeconds = 0
 	}

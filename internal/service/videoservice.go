@@ -187,9 +187,8 @@ func (s *VideoService) OpenLocalVideo(path string) (*OpenVideoResult, error) {
 
 	if resource == nil {
 		resource = &models.Resource{
-			LocalPath:     path,
-			CreateTime:    &now,
-			CompletedTime: &now,
+			LocalPath:  path,
+			CreateTime: &now,
 		}
 	}
 
@@ -204,12 +203,15 @@ func (s *VideoService) OpenLocalVideo(path string) (*OpenVideoResult, error) {
 	resource.FileSize = &fileSize
 	resource.MimeType = &mimeType
 	resource.ResourceType = filetype.Video
-	resource.LocalStatus = models.LocalStatusExists
-	resource.DownloadStatus = models.JobStatusCompleted
+	resource.Kind = models.KindLocal
+	resource.TaskState = models.TaskCompleted
+	resource.LocalState = models.LocalPresent
+	resource.LocalLossReason = models.LossNone
+	resource.StateVersion++
+	resource.StateChangedAt = &now
+	resource.VerifiedAt = &now
+	resource.LocalCheckedAt = &now
 	resource.UpdateTime = &now
-	if resource.CompletedTime == nil {
-		resource.CompletedTime = &now
-	}
 
 	if err := s.resourceDao.SaveLocalResource(resource); err != nil {
 		slog.Error("保存本地资源失败", "path", path, "err", err)

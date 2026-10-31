@@ -172,9 +172,24 @@ func (h *VideoHandler) Video(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger.App.Info("Video", "id", id, "downloadStatus", resource.DownloadStatus)
-	if resource.DownloadStatus == models.JobStatusCompleted {
+	logger.App.Info("Video", "id", id, "taskState", resource.TaskState.String(), "localState", resource.LocalState.String())
+
+	// 本地文件齐全（本地视频或已校验完成的种子）直接读本地文件。
+	if resource.Kind == models.KindLocal || (resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent) {
 		h.videoLocal(w, r, resource)
+		return
+	}
+	if resource.TaskState == models.TaskCompleted {
+		// 已完成但本地文件缺失 / 损坏，明确报错而不是回退到种子。
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+		return
+	}
+	if resource.TaskState == models.TaskPaused {
+		http.Error(w, h.i18nService.T("video.error_task_paused", nil), http.StatusServiceUnavailable)
+		return
+	}
+	if !resource.TaskState.Active() {
+		http.Error(w, h.i18nService.T("download.error.task_not_found", nil), http.StatusNotFound)
 		return
 	}
 	h.videoTorrent(w, r, resource)
@@ -244,7 +259,7 @@ func (h *VideoHandler) videoTorrent(
 		http.Error(w, h.i18nService.T("download.error.task_not_found", nil), http.StatusNotFound)
 		return
 	}
-	if job.CurrentStatus() == models.JobStatusPaused {
+	if job.CurrentState() == models.TaskPaused {
 		http.Error(w, h.i18nService.T("video.error_task_paused", nil), http.StatusServiceUnavailable)
 		return
 	}
@@ -256,7 +271,7 @@ func (h *VideoHandler) videoTorrent(
 
 	// 优先使用前端指定的文件，未指定时回退到资源记录中的文件名
 	fileName := r.URL.Query().Get("file")
-	logger.App.Info("Video----------------------", fileName)
+	logger.App.Info("Video", "file", fileName)
 	if fileName == "" && resource.FileName != nil {
 		fileName = *resource.FileName
 	}

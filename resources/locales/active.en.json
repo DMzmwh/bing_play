@@ -210,27 +210,11 @@
     "description": "torrent list - failed to load the list",
     "other": "Failed to load the resource list"
   },
-  "resources.status.not_downloaded": {
+  "resources.status.undownloaded": {
     "description": "torrent list - status: not downloaded",
     "other": "Not downloaded"
   },
-  "resources.status.exists": {
-    "description": "torrent list - status: file exists locally",
-    "other": "Downloaded"
-  },
-  "resources.status.missing": {
-    "description": "torrent list - status: local file is missing",
-    "other": "Missing"
-  },
-  "resources.status.corrupted": {
-    "description": "torrent list - status: local file is corrupted",
-    "other": "Corrupted"
-  },
-  "resources.status.deleted": {
-    "description": "torrent list - status: local file deleted",
-    "other": "Deleted"
-  },
-  "resources.status.download_meta_info": {
+  "resources.status.fetching_meta": {
     "description": "torrent list - status: fetching metadata",
     "other": "Fetching metadata"
   },
@@ -246,6 +230,14 @@
     "description": "torrent list - status: paused",
     "other": "Paused"
   },
+  "resources.status.verifying": {
+    "description": "torrent list - status: verifying",
+    "other": "Verifying"
+  },
+  "resources.status.retrying": {
+    "description": "torrent list - status: waiting to retry",
+    "other": "Waiting to retry"
+  },
   "resources.status.completed": {
     "description": "torrent list - status: completed",
     "other": "Completed"
@@ -257,6 +249,22 @@
   "resources.status.cancelled": {
     "description": "torrent list - status: cancelled",
     "other": "Cancelled"
+  },
+  "resources.status.file_lost": {
+    "description": "torrent list - status: downloaded file is missing",
+    "other": "File missing"
+  },
+  "resources.status.corrupted": {
+    "description": "torrent list - status: local file is corrupted",
+    "other": "Corrupted"
+  },
+  "resources.status.local_ready": {
+    "description": "torrent list - status: local video available",
+    "other": "Available locally"
+  },
+  "resources.status.local_lost": {
+    "description": "torrent list - status: local video file is missing",
+    "other": "Local file missing"
   },
   "resources.status.unknown": {
     "description": "torrent list - status: unknown",
@@ -400,6 +408,10 @@
     "description": "download center - cancel button",
     "other": "Cancel task"
   },
+  "download.action.repair": {
+    "description": "download center - repair button for missing files",
+    "other": "Repair"
+  },
   "download.action.priority_up": {
     "description": "download center - raise priority button",
     "other": "Raise priority"
@@ -459,6 +471,26 @@
   "download.error.network": {
     "description": "download error - network issue",
     "other": "Network connection error, retrying automatically"
+  },
+  "download.error.integrity": {
+    "description": "download error - file verification failed",
+    "other": "File verification failed, downloading again"
+  },
+  "download.error.cancel_too_late": {
+    "description": "download error - cannot cancel while verifying",
+    "other": "The task is being verified and cannot be cancelled right now"
+  },
+  "download.error.invalid_transition": {
+    "description": "download error - action not supported in current state",
+    "other": "This action is not supported in the current state"
+  },
+  "download.error.repair_not_needed": {
+    "description": "download error - repair not needed",
+    "other": "The task is already completed, no repair needed"
+  },
+  "download.error.delete_not_allowed": {
+    "description": "download error - deletion not allowed",
+    "other": "This task cannot be deleted in the current state"
   },
 
   "settings.title": {

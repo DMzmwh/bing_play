@@ -1,9 +1,12 @@
 package vo
 
-import "github.com/bing/bing-play/internal/db/models"
-
 // TorrentJobVO 下载任务快照。
 // 用于事件推送（download:progress / download:state-changed）与下载页列表展示。
+//
+// 状态字段均为字符串形式，前端直接拼装语言包 key，无需感知后端枚举数值：
+//   - TaskState 下载任务生命周期
+//   - LocalState 本地文件可用性
+//   - DisplayState 由 (Kind, TaskState, LocalState) 派生的展示态
 type TorrentJobVO struct {
 	// InfoHash Torrent 唯一标识，前端按该字段更新对应任务。
 	InfoHash string `json:"infoHash"`
@@ -11,8 +14,12 @@ type TorrentJobVO struct {
 	Name string `json:"name"`
 	// FileName 主视频文件名，未识别时为空。
 	FileName string `json:"fileName"`
-	// Status 当前下载状态。
-	Status models.JobStatus `json:"status"`
+	// TaskState 下载任务生命周期状态。
+	TaskState string `json:"taskState"`
+	// LocalState 本地文件可用性状态。
+	LocalState string `json:"localState"`
+	// DisplayState 前端展示态。
+	DisplayState string `json:"displayState"`
 	// Progress 下载进度，范围 0-100。
 	Progress float64 `json:"progress"`
 	// Downloaded 已下载字节数。
@@ -29,14 +36,18 @@ type TorrentJobVO struct {
 	EtaSeconds int64 `json:"etaSeconds"`
 	// Priority 下载优先级，数值越大越先下载。
 	Priority int `json:"priority"`
-	// RetryCount 已自动重试次数。
-	RetryCount int `json:"retryCount"`
-	// ErrorMessage 最近一次失败原因（i18n key），成功时为空。
-	ErrorMessage string `json:"errorMessage"`
+	// Attempt 当前连续失败次数。
+	Attempt int `json:"attempt"`
+	// MaxAttempts 自动重试上限。
+	MaxAttempts int `json:"maxAttempts"`
+	// ErrorCode 最近一次失败原因（i18n key），成功时为空。
+	ErrorCode string `json:"errorCode"`
+	// NextRetryAt 下一次自动重试时间，非重试等待状态时为空。
+	NextRetryAt string `json:"nextRetryAt"`
 	// SavePath 任务创建时确定的下载目录。
 	SavePath string `json:"savePath"`
 	// CreatedTime 任务创建时间，格式 2006-01-02 15:04:05。
 	CreatedTime string `json:"createdTime"`
-	// CompletedTime 完成时间，未完成时为空。
-	CompletedTime string `json:"completedTime"`
+	// VerifiedAt 最近一次校验通过时间，未通过时为空。
+	VerifiedAt string `json:"verifiedAt"`
 }
