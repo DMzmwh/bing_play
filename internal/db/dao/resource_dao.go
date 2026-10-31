@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bing/bing-play/internal/db/models"
+	"github.com/bing/bing-play/internal/filetype"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -203,27 +204,45 @@ func (d *ResourceDAO) Get(id string) (*models.Resource, error) {
 	return &r, err
 }
 
-// ListPlayable 查询播放列表所需的本地资源，按资源名称、创建时间排序。
+// ListPlayable 查询播放列表所需的资源，按资源名称、创建时间排序。
 //
-// 只返回"本地文件齐全"的记录：
-//   - 本地视频：KindLocal + LocalPresent
-//   - 种子资源：KindTorrent + TaskCompleted + LocalPresent
+// 返回三类记录：
+//   - 本地视频：KindLocal + LocalPresent，直接读本地文件；
+//   - 已完成种子：KindTorrent + TaskCompleted + LocalPresent；
+//   - 下载中 / 校验中的种子：支持边下边播，播放时从种子任务实时拉取分片。
+//
+// 已完成但文件丢失 / 损坏的种子不可播放，不在列表中；
+// 种子任务没有可播放的视频主文件时（FileName 为空或非视频扩展名）同样过滤。
 func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 	var list []models.Resource
 
 	err := d.db.
 		Where(
-			"local_state = ? AND (kind = ? OR task_state = ?)",
-			int8(models.LocalPresent),
-			int8(models.KindLocal),
-			int8(models.TaskCompleted),
+			"(kind = ? AND local_state = ?) OR (kind = ? AND ((task_state = ? AND local_state = ?) OR task_state IN (?, ?)))",
+			int8(models.KindLocal), int8(models.LocalPresent),
+			int8(models.KindTorrent),
+			int8(models.TaskCompleted), int8(models.LocalPresent),
+			int8(models.TaskDownloading), int8(models.TaskVerifying),
 		).
 		Where("local_path <> ''").
 		Order("resource_name ASC, create_time ASC").
 		Find(&list).
 		Error
+	if err != nil {
+		return nil, err
+	}
 
-	return list, err
+	playable := list[:0]
+	for _, resource := range list {
+		if resource.Kind == models.KindTorrent {
+			if resource.FileName == nil || !filetype.IsVideo(*resource.FileName) {
+				continue
+			}
+		}
+		playable = append(playable, resource)
+	}
+
+	return playable, nil
 }
 
 // SaveCrawledResources 批量写入爬虫抓取到的种子资源。

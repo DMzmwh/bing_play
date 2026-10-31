@@ -234,6 +234,90 @@ func TestGetByInfoHashAndIDs(t *testing.T) {
 	}
 }
 
+func TestListPlayable(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	fileName := func(s string) *string { return &s }
+	localPath := `D:\downloads`
+
+	mk := func(hash string, kind models.Kind, task models.TaskState, local models.LocalState, file *string) *models.Resource {
+		name := hash
+		return &models.Resource{
+			InfoHash:     hash,
+			ResourceName: &name,
+			FileName:     file,
+			LocalPath:    localPath,
+			Kind:         kind,
+			TaskState:    task,
+			LocalState:   local,
+			CreateTime:   &now,
+			UpdateTime:   &now,
+		}
+	}
+
+	cases := []struct {
+		resource *models.Resource
+		want     bool
+	}{
+		// 本地视频：可用
+		{mk("", models.KindLocal, models.TaskCompleted, models.LocalPresent, fileName("local.mp4")), true},
+		// 下载中 / 校验中的视频：支持边下边播
+		{mk("hash-downloading", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("downloading.mkv")), true},
+		{mk("hash-verifying", models.KindTorrent, models.TaskVerifying, models.LocalPartial, fileName("verifying.mp4")), true},
+		// 已完成且本地齐备
+		{mk("hash-completed", models.KindTorrent, models.TaskCompleted, models.LocalPresent, fileName("completed.mp4")), true},
+		// 已完成但文件丢失 / 损坏不可播放
+		{mk("hash-lost", models.KindTorrent, models.TaskCompleted, models.LocalMissing, fileName("lost.mp4")), false},
+		{mk("hash-corrupted", models.KindTorrent, models.TaskCompleted, models.LocalCorrupted, fileName("corrupted.mp4")), false},
+		// 暂停、排队中的任务没有活跃下载上下文
+		{mk("hash-paused", models.KindTorrent, models.TaskPaused, models.LocalPartial, fileName("paused.mp4")), false},
+		{mk("hash-queued", models.KindTorrent, models.TaskQueued, models.LocalNone, fileName("queued.mp4")), false},
+		// 非视频种子不进入播放列表
+		{mk("hash-archive", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("archive.zip")), false},
+		{mk("hash-no-file", models.KindTorrent, models.TaskDownloading, models.LocalPartial, nil), false},
+	}
+
+	wantCount := 0
+	for _, c := range cases {
+		if err := d.Save(c.resource); err != nil {
+			t.Fatalf("写入资源 %q 失败: %v", c.resource.InfoHash, err)
+		}
+		if c.want {
+			wantCount++
+		}
+	}
+
+	playable, err := d.ListPlayable()
+	if err != nil {
+		t.Fatalf("查询播放列表失败: %v", err)
+	}
+	if len(playable) != wantCount {
+		t.Fatalf("播放列表数量 = %d, want %d (%v)", len(playable), wantCount, playable)
+	}
+
+	got := make(map[string]bool, len(playable))
+	for _, item := range playable {
+		key := item.InfoHash
+		if item.Kind == models.KindLocal {
+			key = "local"
+		}
+		got[key] = true
+	}
+	for _, c := range cases {
+		key := c.resource.InfoHash
+		if c.resource.Kind == models.KindLocal {
+			key = "local"
+		}
+		if c.want && !got[key] {
+			t.Errorf("应出现在播放列表的资源 %q 缺失", key)
+		}
+		if !c.want && got[key] {
+			t.Errorf("不应出现在播放列表的资源 %q 出现了", key)
+		}
+	}
+}
+
 func TestListDownloadTasks(t *testing.T) {
 	d := newTestResourceDAO(t)
 

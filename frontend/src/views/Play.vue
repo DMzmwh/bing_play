@@ -226,6 +226,8 @@ onDeactivated(() => {
 /** 切回播放页：若离开前正在播放，则自动继续播放 */
 onActivated(() => {
     pageActive.value = true
+    // 下载中的视频会进入播放列表，切回时重新拉取才能看到新任务
+    void fetchPlaylist()
     if (!resumeOnActivate) return
     resumeOnActivate = false
     void playerRef.value?.play()
