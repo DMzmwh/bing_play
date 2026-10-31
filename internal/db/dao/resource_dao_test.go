@@ -103,3 +103,191 @@ func TestSaveCrawledResourcesEmpty(t *testing.T) {
 		t.Fatalf("空列表不应报错: %v", err)
 	}
 }
+
+func TestListCrawled(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	base := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+	sizes := map[string]int64{"hash-1": 100, "hash-2": 300, "hash-3": 200}
+	names := map[string]string{"hash-1": "资源一", "hash-2": "资源二", "hash-3": "资源三"}
+
+	list := make([]*models.Resource, 0, len(sizes))
+	for hash, size := range sizes {
+		created := base.Add(time.Duration(sizes[hash]) * time.Minute)
+		name, totalSize := names[hash], size
+		list = append(list, &models.Resource{
+			InfoHash:     hash,
+			ResourceName: &name,
+			TotalSize:    &totalSize,
+			CreateTime:   &created,
+			UpdateTime:   &created,
+		})
+	}
+	if err := d.SaveCrawledResources(list); err != nil {
+		t.Fatalf("写入爬取资源失败: %v", err)
+	}
+
+	// 本地视频没有 InfoHash，不应出现在爬取资源列表里。
+	localName := "本地视频"
+	localTime := base
+	if err := d.SaveLocalResource(&models.Resource{
+		ResourceName: &localName,
+		CreateTime:   &localTime,
+		UpdateTime:   &localTime,
+	}); err != nil {
+		t.Fatalf("写入本地资源失败: %v", err)
+	}
+
+	all, total, err := d.ListCrawled(CrawledListQuery{SortBy: "create_time", SortOrder: "asc", Limit: 20})
+	if err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if total != 3 || len(all) != 3 {
+		t.Fatalf("total = %d, len = %d, want 3", total, len(all))
+	}
+
+	bySize, total, err := d.ListCrawled(CrawledListQuery{SortBy: "total_size", SortOrder: "desc", Limit: 20})
+	if err != nil {
+		t.Fatalf("按体积排序失败: %v", err)
+	}
+	if total != 3 || bySize[0].InfoHash != "hash-2" {
+		t.Fatalf("按体积倒序首条 = %q, want hash-2", bySize[0].InfoHash)
+	}
+
+	filtered, total, err := d.ListCrawled(CrawledListQuery{Keyword: "hash-2", Limit: 20})
+	if err != nil {
+		t.Fatalf("关键词查询失败: %v", err)
+	}
+	if total != 1 || len(filtered) != 1 || filtered[0].InfoHash != "hash-2" {
+		t.Fatalf("关键词查询结果 = %v, total = %d", filtered, total)
+	}
+
+	page, total, err := d.ListCrawled(CrawledListQuery{SortBy: "create_time", SortOrder: "desc", Offset: 1, Limit: 1})
+	if err != nil {
+		t.Fatalf("分页查询失败: %v", err)
+	}
+	if total != 3 || len(page) != 1 {
+		t.Fatalf("分页 total = %d, len = %d, want 3/1", total, len(page))
+	}
+}
+
+func TestGetByInfoHashAndIDs(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	nameA, nameB := "资源A", "资源B"
+	if err := d.Save(&models.Resource{
+		InfoHash:     "hash-1",
+		ResourceName: &nameA,
+		CreateTime:   &now,
+		UpdateTime:   &now,
+	}); err != nil {
+		t.Fatalf("写入 hash-1 失败: %v", err)
+	}
+	if err := d.Save(&models.Resource{
+		InfoHash:     "hash-2",
+		ResourceName: &nameB,
+		CreateTime:   &now,
+		UpdateTime:   &now,
+	}); err != nil {
+		t.Fatalf("写入 hash-2 失败: %v", err)
+	}
+
+	got, err := d.GetByInfoHash("hash-1")
+	if err != nil {
+		t.Fatalf("按 InfoHash 查询失败: %v", err)
+	}
+	if got == nil || got.InfoHash != "hash-1" {
+		t.Fatalf("按 InfoHash 查询结果 = %v", got)
+	}
+
+	missing, err := d.GetByInfoHash("hash-missing")
+	if err != nil {
+		t.Fatalf("查询不存在的 InfoHash 不应报错: %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("不存在的 InfoHash 应返回 nil, got %v", missing)
+	}
+
+	empty, err := d.GetByInfoHash("")
+	if err != nil || empty != nil {
+		t.Fatalf("空 InfoHash 应返回 nil, got %v, err %v", empty, err)
+	}
+
+	list, err := d.GetByIDs([]int64{got.ID})
+	if err != nil {
+		t.Fatalf("按 ID 查询失败: %v", err)
+	}
+	if len(list) != 1 || list[0].InfoHash != "hash-1" {
+		t.Fatalf("按 ID 查询结果 = %v", list)
+	}
+
+	none, err := d.GetByIDs(nil)
+	if err != nil || none != nil {
+		t.Fatalf("空 ID 列表应返回 nil, got %v, err %v", none, err)
+	}
+}
+
+func TestListDownloadTasks(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	mk := func(hash string, status models.JobStatus, minute int) *models.Resource {
+		name := hash
+		created := now.Add(time.Duration(minute) * time.Minute)
+		return &models.Resource{
+			InfoHash:       hash,
+			ResourceName:   &name,
+			DownloadStatus: status,
+			CreateTime:     &created,
+			UpdateTime:     &created,
+		}
+	}
+
+	// 爬虫原始记录（状态 0）与本地视频不应出现在下载任务列表。
+	if err := d.Save(mk("hash-raw", models.JobStatus0, 0)); err != nil {
+		t.Fatalf("写入原始记录失败: %v", err)
+	}
+	localName := "本地视频"
+	if err := d.SaveLocalResource(&models.Resource{
+		ResourceName: &localName,
+		CreateTime:   &now,
+		UpdateTime:   &now,
+	}); err != nil {
+		t.Fatalf("写入本地视频失败: %v", err)
+	}
+
+	// 下载中、已完成、已取消三条任务应全部返回。
+	statuses := []models.JobStatus{
+		models.JobStatusDownloading,
+		models.JobStatusCompleted,
+		models.JobStatusCancelled,
+	}
+	for i, status := range statuses {
+		hash := "hash-task-" + string(rune('a'+i))
+		if err := d.Save(mk(hash, status, i+1)); err != nil {
+			t.Fatalf("写入下载任务失败: %v", err)
+		}
+	}
+
+	tasks, err := d.ListDownloadTasks()
+	if err != nil {
+		t.Fatalf("查询下载任务失败: %v", err)
+	}
+	if len(tasks) != len(statuses) {
+		t.Fatalf("下载任务数 = %d, want %d (%v)", len(tasks), len(statuses), tasks)
+	}
+
+	byStatus, err := d.ListByDownloadStatuses([]models.JobStatus{models.JobStatusDownloading})
+	if err != nil {
+		t.Fatalf("按状态查询失败: %v", err)
+	}
+	if len(byStatus) != 1 || byStatus[0].InfoHash != "hash-task-a" {
+		t.Fatalf("按状态查询结果 = %v", byStatus)
+	}
+
+	none, err := d.ListByDownloadStatuses(nil)
+	if err != nil || none != nil {
+		t.Fatalf("空状态列表应返回 nil, got %v, err %v", none, err)
+	}
+}

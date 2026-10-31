@@ -12,10 +12,12 @@ import (
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
 	"github.com/bing/bing-play/internal/i18n"
+	"github.com/bing/bing-play/internal/logger"
 	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
 
+	"github.com/anacrolix/torrent"
 	"go.uber.org/fx"
 )
 
@@ -37,9 +39,10 @@ type VideoHandlerParams struct {
 func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
 
 	return &VideoHandler{
-		resourceDao:  params.ResourceDao,
-		videoService: params.VideoService,
-		i18nService:  params.I18n,
+		resourceDao:    params.ResourceDao,
+		videoService:   params.VideoService,
+		i18nService:    params.I18n,
+		torrentManager: params.TorrentManager,
 	}
 }
 
@@ -160,20 +163,20 @@ func (h *VideoHandler) Video(w http.ResponseWriter, r *http.Request) {
 
 	resource, err := h.resourceDao.Get(id)
 	if err != nil {
-		http.Error(w, "查询失败", http.StatusInternalServerError)
+		http.Error(w, h.i18nService.T("video.error_query_failed", nil), http.StatusInternalServerError)
 		return
 	}
 
 	if resource == nil {
-		http.NotFound(w, r)
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
 		return
 	}
 
+	logger.App.Info("Video", "id", id, "downloadStatus", resource.DownloadStatus)
 	if resource.DownloadStatus == models.JobStatusCompleted {
 		h.videoLocal(w, r, resource)
 		return
 	}
-
 	h.videoTorrent(w, r, resource)
 }
 
@@ -182,89 +185,107 @@ func (h *VideoHandler) videoLocal(
 	r *http.Request,
 	resource *models.Resource,
 ) {
-
 	filePath := resource.LocalPath
+	if filePath == "" {
+		http.Error(w, h.i18nService.T("video.error_empty_path", nil), http.StatusNotFound)
+		return
+	}
+
 	infoV, err := os.Stat(filePath)
 	if err != nil {
-		http.Error(w, "文件不存在", http.StatusNotFound)
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
 		return
 	}
 	if infoV.IsDir() {
 		fileItemPath := r.URL.Query().Get("file")
-		if fileItemPath != "" {
-			filePath = filepath.Join(filePath, fileItemPath)
-		} else {
-			http.Error(w, "请选择文件", http.StatusInternalServerError)
+		if fileItemPath == "" && resource.FileName != nil {
+			fileItemPath = *resource.FileName
+		}
+		if fileItemPath == "" {
+			http.Error(w, h.i18nService.T("video.error_file_required", nil), http.StatusBadRequest)
 			return
 		}
+		filePath = filepath.Join(filePath, fileItemPath)
 	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
-		http.Error(w, "打开视频失败", http.StatusInternalServerError)
+		http.Error(w, h.i18nService.T("video.error_open_failed", nil), http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		http.Error(w, "获取视频信息失败", http.StatusInternalServerError)
+		http.Error(w, h.i18nService.T("video.error_stat_failed", nil), http.StatusInternalServerError)
 		return
 	}
 
-	// 让 Go 原生 HTTP Server 处理：
-	// Range
-	// 206 Partial Content
-	// Content-Length
-	// Content-Range
-	// Seek
-	http.ServeContent(
-		w,
-		r,
-		*resource.FileName,
-		info.ModTime(),
-		file,
-	)
+	name := filepath.Base(filePath)
+	if resource.FileName != nil && *resource.FileName != "" {
+		name = *resource.FileName
+	}
+
+	// 让 Go 原生 HTTP Server 处理 Range / 206 / Content-Length / Seek
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 func (h *VideoHandler) videoTorrent(
 	w http.ResponseWriter,
 	r *http.Request,
 	resource *models.Resource,
 ) {
-	//根据 resource 找到正在下载的 TorrentJob
-	job, error := h.torrentManager.GetJob(resource.InfoHash)
-	if error != nil {
-		http.Error(w, error.Error(), http.StatusNotFound)
+	if h.torrentManager == nil {
+		http.Error(w, h.i18nService.T("video.error_service_unavailable", nil), http.StatusServiceUnavailable)
 		return
 	}
-	//
-	//t := job.GetTorrent()
-	//
-	//if t == nil {
-	//	http.Error(w, "Torrent 未准备好", http.StatusServiceUnavailable)
-	//	return
-	//}
+	// 根据 resource 找到正在下载的 TorrentJob
+	job, err := h.torrentManager.GetJob(resource.InfoHash)
+	if err != nil {
+		http.Error(w, h.i18nService.T("download.error.task_not_found", nil), http.StatusNotFound)
+		return
+	}
+	if job.CurrentStatus() == models.JobStatusPaused {
+		http.Error(w, h.i18nService.T("video.error_task_paused", nil), http.StatusServiceUnavailable)
+		return
+	}
+	tt := job.GetTorrent()
+	if tt == nil || tt.Info() == nil {
+		http.Error(w, h.i18nService.T("video.error_metadata_not_ready", nil), http.StatusServiceUnavailable)
+		return
+	}
 
-	filePath := r.URL.Query().Get("file")
-	// 找到视频文件
-	file := job.GetFile(filePath)
-	//file := findTorrentFile(t, resource.FileName)
+	// 优先使用前端指定的文件，未指定时回退到资源记录中的文件名
+	fileName := r.URL.Query().Get("file")
+	logger.App.Info("Video----------------------", fileName)
+	if fileName == "" && resource.FileName != nil {
+		fileName = *resource.FileName
+	}
+	file := job.GetFile(fileName)
 	if file == nil {
-		http.Error(w, "Torrent 文件不存在", http.StatusNotFound)
+		http.Error(w, h.i18nService.T("video.error_no_playable_file", nil), http.StatusNotFound)
 		return
 	}
+
+	// 边下边播：允许数据下载，并优先获取正在播放文件的分片
+	tt.AllowDataDownload()
+	tt.DownloadAll()
+	file.SetPriority(torrent.PiecePriorityHigh)
 
 	reader := file.NewReader()
 	defer reader.Close()
 
-	// Torrent Reader 支持 Seek
-	// HTTP Range 对应的 Seek 会由下面的 ServeContent 触发
-	http.ServeContent(
-		w,
-		r,
-		*resource.FileName,
-		time.Time{},
-		reader,
-	)
+	// 客户端断开或 Range 请求结束时，及时取消阻塞中的读取
+	reader.SetContext(r.Context())
+	// 预读 4MB，减少边下边播时的卡顿
+	reader.SetReadahead(4 << 20)
+
+	name := fileName
+	if name == "" {
+		name = filepath.Base(file.Path())
+	}
+
+	// Torrent Reader 支持 Seek，HTTP Range 对应的 Seek 会由 ServeContent 触发
+	http.ServeContent(w, r, name, time.Time{}, reader)
 }
 func (h *VideoHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	//

@@ -18,7 +18,19 @@ const (
 	JobStatusCompleted JobStatus = "completed"
 	// JobStatusFailed 下载任务执行失败。
 	JobStatusFailed JobStatus = "failed"
+	// JobStatusCancelled 下载任务已被用户取消。
+	JobStatusCancelled JobStatus = "cancelled"
 )
+
+// IsActive 判断任务是否处于活跃状态：获取元信息、排队或下载中。
+func (s JobStatus) IsActive() bool {
+	switch s {
+	case JobStatusDownloadMetaInfo, JobStatusQueued, JobStatusDownloading:
+		return true
+	default:
+		return false
+	}
+}
 
 // LocalStatus 本地文件状态。
 type LocalStatus string

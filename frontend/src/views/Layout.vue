@@ -48,7 +48,12 @@
         </div>
 
         <div class="body">
-            <router-view/>
+            <!-- 只缓存播放页：切到其它 tab 时播放器实例保留，回来可继续播放 -->
+            <router-view v-slot="{ Component }">
+                <keep-alive include="Play">
+                    <component :is="Component" />
+                </keep-alive>
+            </router-view>
         </div>
     </div>
 </template>
@@ -66,7 +71,9 @@ const tabs = computed(() => [
     { label: t("nav.play"), path: "/play" },
     { label: t("nav.download"), path: "/download" },
     { label: t("nav.library"), path: "/library" },
+    { label: t("nav.resources"), path: "/resources" },
     { label: t("nav.find"), path: "/find" },
+    { label: t("nav.settings"), path: "/settings" },
 ]);
 
 const langOptions = computed(() =>
@@ -104,7 +111,7 @@ const refresh = () => window.location.reload();
     max-height: 100dvh;
     display: flex;
     flex-direction: column;
-    background: #0b0f14;
+    background: var(--app-bg);
     overflow: hidden;
 }
 
@@ -116,8 +123,8 @@ const refresh = () => window.location.reload();
     align-items: center;
     padding-left: 20px;
     box-sizing: border-box;
-    background: #0f1620;
-    border-bottom: 1px solid #1d2733;
+    background: var(--app-surface);
+    border-bottom: 1px solid var(--app-border);
     user-select: none;
 }
 
@@ -134,18 +141,18 @@ const refresh = () => window.location.reload();
     display: flex;
     align-items: center;
     padding: 0 12px;
-    color: #aaa;
+    color: var(--app-text-muted);
     cursor: pointer;
     box-sizing: border-box;
 }
 
 .tab:hover {
-    color: #ddd;
+    color: var(--app-text);
 }
 
 .tab.active {
-    color: #fff;
-    border-bottom: 2px solid #3b82f6;
+    color: var(--app-text);
+    border-bottom: 2px solid var(--app-accent, #3b82f6);
 }
 
 .drag-area {
@@ -156,11 +163,11 @@ const refresh = () => window.location.reload();
 }
 
 .lang-icon .globe {
-    color: #aaa;
+    color: var(--app-text-muted);
 }
 
 .lang-icon:hover .globe {
-    color: #fff;
+    color: var(--app-text);
 }
 
 .right-icon,
@@ -171,15 +178,15 @@ const refresh = () => window.location.reload();
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    color: #aaa;
+    color: var(--app-text-muted);
     cursor: pointer;
     box-sizing: border-box;
 }
 
 .right-icon:hover,
 .window-button:hover {
-    color: #fff;
-    background: #1a2430;
+    color: var(--app-text);
+    background: var(--app-hover);
 }
 
 .window-button.close:hover {

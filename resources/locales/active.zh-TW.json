@@ -42,6 +42,14 @@
     "description": "頂部導覽 - 找片",
     "other": "找片"
   },
+  "nav.resources": {
+    "description": "頂部導覽 - 已爬取的種子資源清單",
+    "other": "種子資源"
+  },
+  "nav.settings": {
+    "description": "頂部導覽 - 系統設定",
+    "other": "設定"
+  },
 
   "video.drop_tip": {
     "description": "播放區 - 拖入檔案時提示放開",
@@ -71,6 +79,34 @@
     "description": "拖入影片 - 登記資源內部失敗備援",
     "other": "開啟影片失敗"
   },
+  "video.error_query_failed": {
+    "description": "播放影片 - 查詢資源失敗",
+    "other": "查詢影片資訊失敗"
+  },
+  "video.error_file_required": {
+    "description": "播放影片 - 未指定種子內的檔案",
+    "other": "請選擇要播放的檔案"
+  },
+  "video.error_stat_failed": {
+    "description": "播放影片 - 讀取檔案資訊失敗",
+    "other": "取得影片資訊失敗"
+  },
+  "video.error_service_unavailable": {
+    "description": "播放影片 - 下載服務未初始化",
+    "other": "下載服務未初始化，請重新啟動應用程式"
+  },
+  "video.error_task_paused": {
+    "description": "播放影片 - 下載任務已暫停",
+    "other": "任務已暫停，請繼續下載後再播放"
+  },
+  "video.error_metadata_not_ready": {
+    "description": "播放影片 - 種子中繼資料尚未就緒",
+    "other": "種子中繼資料尚未就緒，請稍後再試"
+  },
+  "video.error_no_playable_file": {
+    "description": "播放影片 - 種子內未找到可播放檔案",
+    "other": "未找到可播放的影片檔案"
+  },
   "video.empty_title": {
     "description": "播放區 - 無影片時的空狀態標題",
     "other": "拖入影片開始播放"
@@ -92,6 +128,493 @@
   "update.available": {
     "description": "更新檢查 - 發現新版本，參數 Version",
     "other": "發現新版本：{{.Version}}"
+  },
+
+  "resources.search_placeholder": {
+    "description": "種子資源清單 - 搜尋框提示文字",
+    "other": "搜尋資源名稱或 InfoHash"
+  },
+  "resources.sort.latest": {
+    "description": "種子資源清單 - 排序：依建立時間倒序",
+    "other": "最新建立"
+  },
+  "resources.sort.oldest": {
+    "description": "種子資源清單 - 排序：依建立時間正序",
+    "other": "最早建立"
+  },
+  "resources.sort.largest": {
+    "description": "種子資源清單 - 排序：依體積由大到小",
+    "other": "體積由大到小"
+  },
+  "resources.sort.smallest": {
+    "description": "種子資源清單 - 排序：依體積由小到大",
+    "other": "體積由小到大"
+  },
+  "resources.col.index": {
+    "description": "種子資源清單 - 表頭：列號序號",
+    "other": "序號"
+  },
+  "resources.col.name": {
+    "description": "種子資源清單 - 表頭：資源標題",
+    "other": "資源標題"
+  },
+  "resources.col.size": {
+    "description": "種子資源清單 - 表頭：資源大小",
+    "other": "大小"
+  },
+  "resources.col.info_hash": {
+    "description": "種子資源清單 - 表頭：InfoHash",
+    "other": "InfoHash"
+  },
+  "resources.copy": {
+    "description": "種子資源清單 - 複製磁力連結按鈕提示",
+    "other": "複製磁力連結"
+  },
+  "resources.copy_success": {
+    "description": "種子資源清單 - 複製成功提示",
+    "other": "磁力連結已複製"
+  },
+  "resources.copy_failed": {
+    "description": "種子資源清單 - 複製失敗提示",
+    "other": "複製失敗，請手動複製"
+  },
+  "resources.col.status": {
+    "description": "種子資源清單 - 表頭：資料狀態",
+    "other": "狀態"
+  },
+  "resources.col.created": {
+    "description": "種子資源清單 - 表頭：建立時間",
+    "other": "建立時間"
+  },
+  "resources.total": {
+    "description": "種子資源清單 - 總數提示，參數 Count",
+    "other": "共 {{.Count}} 筆"
+  },
+  "resources.empty_title": {
+    "description": "種子資源清單 - 無資料時的空狀態標題",
+    "other": "尚無爬取資源"
+  },
+  "resources.empty_hint": {
+    "description": "種子資源清單 - 無資料時的空狀態說明",
+    "other": "爬蟲會在背景自動抓取，稍後再回來看看"
+  },
+  "resources.search_empty_title": {
+    "description": "種子資源清單 - 搜尋無結果標題",
+    "other": "沒有符合的資源"
+  },
+  "resources.search_empty_hint": {
+    "description": "種子資源清單 - 搜尋無結果說明",
+    "other": "換個關鍵字試試"
+  },
+  "resources.load_failed": {
+    "description": "種子資源清單 - 載入失敗提示",
+    "other": "載入資源清單失敗"
+  },
+  "resources.status.not_downloaded": {
+    "description": "種子資源清單 - 狀態：未下載",
+    "other": "未下載"
+  },
+  "resources.status.exists": {
+    "description": "種子資源清單 - 狀態：本機已存在",
+    "other": "本機已存在"
+  },
+  "resources.status.missing": {
+    "description": "種子資源清單 - 狀態：本機檔案遺失",
+    "other": "檔案遺失"
+  },
+  "resources.status.corrupted": {
+    "description": "種子資源清單 - 狀態：檔案損毀",
+    "other": "檔案損毀"
+  },
+  "resources.status.deleted": {
+    "description": "種子資源清單 - 狀態：檔案已刪除",
+    "other": "檔案已刪除"
+  },
+  "resources.status.download_meta_info": {
+    "description": "種子資源清單 - 狀態：取得中繼資訊",
+    "other": "取得中繼資訊"
+  },
+  "resources.status.queued": {
+    "description": "種子資源清單 - 狀態：等待下載",
+    "other": "等待下載"
+  },
+  "resources.status.downloading": {
+    "description": "種子資源清單 - 狀態：下載中",
+    "other": "下載中"
+  },
+  "resources.status.paused": {
+    "description": "種子資源清單 - 狀態：已暫停",
+    "other": "已暫停"
+  },
+  "resources.status.completed": {
+    "description": "種子資源清單 - 狀態：已完成",
+    "other": "已完成"
+  },
+  "resources.status.failed": {
+    "description": "種子資源清單 - 狀態：失敗",
+    "other": "失敗"
+  },
+  "resources.status.cancelled": {
+    "description": "種子資源清單 - 狀態：已取消",
+    "other": "已取消"
+  },
+  "resources.status.unknown": {
+    "description": "種子資源清單 - 狀態：未知",
+    "other": "未知"
+  },
+
+  "resources.batch_download": {
+    "description": "種子資源清單 - 按鈕：批次下載選取資源",
+    "other": "批次下載"
+  },
+  "resources.batch_selected": {
+    "description": "種子資源清單 - 已選數量",
+    "other": "已選 {{.Count}} 項"
+  },
+  "resources.batch_clear": {
+    "description": "種子資源清單 - 按鈕：清除選取",
+    "other": "清除選取"
+  },
+  "resources.batch_empty": {
+    "description": "種子資源清單 - 提示：未選取資源",
+    "other": "請先選取需要下載的資源"
+  },
+  "resources.batch_result": {
+    "description": "種子資源清單 - 批次下載結果",
+    "other": "已加入 {{.Added}} 個，略過 {{.Skipped}} 個，失敗 {{.Failed}} 個"
+  },
+  "resources.batch_failed": {
+    "description": "種子資源清單 - 批次下載部分失敗提示",
+    "other": "部分資源加入下載佇列失敗：{{.Reason}}"
+  },
+
+  "download.title": {
+    "description": "下載中心 - 頁面標題",
+    "other": "下載中心"
+  },
+  "download.subtitle": {
+    "description": "下載中心 - 頁面說明",
+    "other": "檢視與管理全部下載任務"
+  },
+  "download.empty_title": {
+    "description": "下載中心 - 空清單標題",
+    "other": "暫無下載任務"
+  },
+  "download.empty_hint": {
+    "description": "下載中心 - 空清單說明",
+    "other": "在種子資源頁選取資源後點擊「批次下載」即可開始"
+  },
+  "download.tab_active": {
+    "description": "下載中心 - 標籤：下載中",
+    "other": "下載中"
+  },
+  "download.tab_completed": {
+    "description": "下載中心 - 標籤：下載完成",
+    "other": "下載完成"
+  },
+  "download.completed_time_label": {
+    "description": "下載中心 - 欄：完成時間",
+    "other": "完成時間"
+  },
+  "download.completed_empty_title": {
+    "description": "下載中心 - 已完成清單空狀態標題",
+    "other": "暫無已完成任務"
+  },
+  "download.completed_empty_hint": {
+    "description": "下載中心 - 已完成清單空狀態說明",
+    "other": "下載完成的任務會顯示在這裡"
+  },
+  "download.load_failed": {
+    "description": "下載中心 - 載入失敗提示",
+    "other": "載入下載任務失敗"
+  },
+  "download.refresh": {
+    "description": "下載中心 - 按鈕：重新整理任務清單",
+    "other": "重新整理"
+  },
+  "download.config": {
+    "description": "下載中心 - 執行參數摘要",
+    "other": "同時下載 {{.MaxConcurrent}} 個任務 · 失敗自動重試 {{.MaxRetries}} 次"
+  },
+  "download.item_size": {
+    "description": "下載中心 - 任務大小",
+    "other": "{{.Downloaded}} / {{.Total}}"
+  },
+  "download.progress_label": {
+    "description": "下載中心 - 欄位：進度",
+    "other": "進度"
+  },
+  "download.item_size_label": {
+    "description": "下載中心 - 欄位：大小",
+    "other": "大小"
+  },
+  "download.speed_label": {
+    "description": "下載中心 - 欄位：速度",
+    "other": "速度"
+  },
+  "download.eta_label": {
+    "description": "下載中心 - 欄位：剩餘時間",
+    "other": "剩餘時間"
+  },
+  "download.priority_label": {
+    "description": "下載中心 - 欄位：優先順序",
+    "other": "優先順序"
+  },
+  "download.actions_label": {
+    "description": "下載中心 - 欄位：操作",
+    "other": "操作"
+  },
+  "download.eta_unknown": {
+    "description": "下載中心 - 剩餘時間無法估算",
+    "other": "無法估算"
+  },
+  "download.eta_seconds": {
+    "description": "下載中心 - 剩餘時間：秒",
+    "other": "{{.Seconds}} 秒"
+  },
+  "download.eta_minutes": {
+    "description": "下載中心 - 剩餘時間：分秒",
+    "other": "{{.Minutes}} 分 {{.Seconds}} 秒"
+  },
+  "download.eta_hours": {
+    "description": "下載中心 - 剩餘時間：時分",
+    "other": "{{.Hours}} 小時 {{.Minutes}} 分"
+  },
+  "download.retry_count": {
+    "description": "下載中心 - 已重試次數",
+    "other": "已重試 {{.Count}} 次"
+  },
+  "download.action.pause": {
+    "description": "下載中心 - 按鈕：暫停",
+    "other": "暫停"
+  },
+  "download.action.resume": {
+    "description": "下載中心 - 按鈕：繼續",
+    "other": "繼續"
+  },
+  "download.action.retry": {
+    "description": "下載中心 - 按鈕：重試",
+    "other": "重試"
+  },
+  "download.action.cancel": {
+    "description": "下載中心 - 按鈕：取消",
+    "other": "取消任務"
+  },
+  "download.action.priority_up": {
+    "description": "下載中心 - 按鈕：提高優先順序",
+    "other": "提高優先順序"
+  },
+  "download.action.priority_down": {
+    "description": "下載中心 - 按鈕：降低優先順序",
+    "other": "降低優先順序"
+  },
+  "download.cancel_confirm": {
+    "description": "下載中心 - 取消任務確認",
+    "other": "確定取消該下載任務嗎？已下載的分片會保留。"
+  },
+  "download.action_failed": {
+    "description": "下載中心 - 任務操作失敗提示",
+    "other": "操作失敗：{{.Reason}}"
+  },
+  "download.error.task_not_found": {
+    "description": "下載錯誤 - 任務不存在",
+    "other": "下載任務不存在"
+  },
+  "download.error.magnet_empty": {
+    "description": "下載錯誤 - 磁力連結為空",
+    "other": "磁力連結不能為空"
+  },
+  "download.error.invalid_magnet": {
+    "description": "下載錯誤 - 磁力連結無效",
+    "other": "磁力連結格式無效"
+  },
+  "download.error.no_source": {
+    "description": "下載錯誤 - 缺少下載來源",
+    "other": "缺少可用的下載來源"
+  },
+  "download.error.metadata_timeout": {
+    "description": "下載錯誤 - 取得中繼資料逾時",
+    "other": "取得種子中繼資料逾時，可能是資源熱度不足"
+  },
+  "download.error.stalled": {
+    "description": "下載錯誤 - 下載停滯",
+    "other": "下載長時間沒有進展，正在自動重試"
+  },
+  "download.error.download_failed": {
+    "description": "下載錯誤 - 一般失敗",
+    "other": "下載失敗，請稍後重試"
+  },
+  "download.error.permission": {
+    "description": "下載錯誤 - 權限不足",
+    "other": "沒有寫入下載目錄的權限，請檢查目錄設定"
+  },
+  "download.error.no_space": {
+    "description": "下載錯誤 - 磁碟空間不足",
+    "other": "磁碟空間不足，無法繼續下載"
+  },
+  "download.error.resource_gone": {
+    "description": "下載錯誤 - 資源失效",
+    "other": "資源已失效或檔案不存在"
+  },
+  "download.error.network": {
+    "description": "下載錯誤 - 網路異常",
+    "other": "網路連線異常，正在自動重試"
+  },
+
+  "settings.title": {
+    "description": "系統設定 - 頁面標題",
+    "other": "系統設定"
+  },
+  "settings.subtitle": {
+    "description": "系統設定 - 頁面說明",
+    "other": "管理應用行為與介面外觀"
+  },
+  "settings.category.general": {
+    "description": "系統設定 - 分組：一般設定",
+    "other": "一般設定"
+  },
+  "settings.category.interface": {
+    "description": "系統設定 - 分組：介面設定",
+    "other": "介面設定"
+  },
+
+  "settings.item.language": {
+    "description": "系統設定 - 設定項：介面語言",
+    "other": "介面語言"
+  },
+  "settings.help.language": {
+    "description": "系統設定 - 說明：介面語言",
+    "other": "選擇應用介面與播放器控制項使用的語言"
+  },
+  "settings.item.download_dir": {
+    "description": "系統設定 - 設定項：下載目錄",
+    "other": "下載目錄"
+  },
+  "settings.help.download_dir": {
+    "description": "系統設定 - 說明：下載目錄",
+    "other": "磁力任務下載檔案的儲存位置，修改後對之後新建的任務生效"
+  },
+  "settings.browse": {
+    "description": "系統設定 - 按鈕：瀏覽選擇目錄",
+    "other": "選擇目錄"
+  },
+  "settings.download_dir_dialog_title": {
+    "description": "系統設定 - 目錄選擇器標題",
+    "other": "選擇下載目錄"
+  },
+  "settings.download_dir_pick_failed": {
+    "description": "系統設定 - 提示：開啟目錄選擇器失敗",
+    "other": "開啟目錄選擇器失敗"
+  },
+  "settings.item.crawler_enabled": {
+    "description": "系統設定 - 設定項：自動啟動 DHT 爬蟲",
+    "other": "自動啟動 DHT 爬蟲"
+  },
+  "settings.help.crawler_enabled": {
+    "description": "系統設定 - 說明：自動啟動 DHT 爬蟲",
+    "other": "應用啟動後自動連線 DHT 網路並抓取種子資源，修改後立即生效"
+  },
+  "settings.item.crawler_port": {
+    "description": "系統設定 - 設定項：爬蟲監聽埠",
+    "other": "爬蟲監聽埠"
+  },
+  "settings.help.crawler_port": {
+    "description": "系統設定 - 說明：爬蟲監聽埠",
+    "other": "DHT 爬蟲使用的 UDP 埠，範圍 1024-65535，修改後立即生效"
+  },
+  "settings.item.theme_mode": {
+    "description": "系統設定 - 設定項：介面主題模式",
+    "other": "介面主題"
+  },
+  "settings.help.theme_mode": {
+    "description": "系統設定 - 說明：介面主題模式",
+    "other": "切換應用整體的配色方案，影響背景、文字與元件外觀"
+  },
+  "settings.theme.dark": {
+    "description": "系統設定 - 主題選項：深色",
+    "other": "深色"
+  },
+  "settings.theme.light": {
+    "description": "系統設定 - 主題選項：淺色",
+    "other": "淺色"
+  },
+  "settings.item.accent_color": {
+    "description": "系統設定 - 設定項：介面強調色",
+    "other": "介面強調色"
+  },
+  "settings.help.accent_color": {
+    "description": "系統設定 - 說明：介面強調色",
+    "other": "用於按鈕、選取狀態和播放器主題的強調色"
+  },
+
+  "settings.save": {
+    "description": "系統設定 - 按鈕：儲存設定",
+    "other": "儲存設定"
+  },
+  "settings.reset": {
+    "description": "系統設定 - 按鈕：重設為預設值",
+    "other": "重設為預設值"
+  },
+  "settings.reset_confirm": {
+    "description": "系統設定 - 重設確認提示",
+    "other": "確定要恢復所有設定為預設值嗎？"
+  },
+  "settings.save_success": {
+    "description": "系統設定 - 提示：儲存成功",
+    "other": "設定已儲存"
+  },
+  "settings.save_failed": {
+    "description": "系統設定 - 提示：儲存失敗",
+    "other": "儲存失敗，請檢查填寫的設定項"
+  },
+  "settings.reset_success": {
+    "description": "系統設定 - 提示：重設成功",
+    "other": "已恢復預設設定"
+  },
+  "settings.reset_failed": {
+    "description": "系統設定 - 提示：重設失敗",
+    "other": "重設設定失敗"
+  },
+  "settings.load_failed": {
+    "description": "系統設定 - 提示：讀取失敗",
+    "other": "讀取設定失敗"
+  },
+
+  "settings.error.language": {
+    "description": "系統設定 - 驗證：語言不受支援",
+    "other": "請選擇受支援的介面語言"
+  },
+  "settings.error.theme_mode": {
+    "description": "系統設定 - 驗證：介面主題不受支援",
+    "other": "請選擇受支援的介面主題"
+  },
+  "settings.error.download_dir": {
+    "description": "系統設定 - 驗證：下載目錄不可用",
+    "other": "下載目錄不可用，請填寫存在或可建立的資料夾"
+  },
+  "settings.error.boolean": {
+    "description": "系統設定 - 驗證：布林值不合法",
+    "other": "開關設定值不合法"
+  },
+  "settings.error.port": {
+    "description": "系統設定 - 驗證：埠範圍不合法",
+    "other": "埠必須為 1024-65535 之間的整數"
+  },
+  "settings.error.page_size": {
+    "description": "系統設定 - 驗證：每頁筆數不合法",
+    "other": "每頁筆數只能選擇 50、100 或 200"
+  },
+  "settings.error.color": {
+    "description": "系統設定 - 驗證：顏色格式不合法",
+    "other": "顏色格式必須為 #RRGGBB"
+  },
+  "settings.error.sidebar_width": {
+    "description": "系統設定 - 驗證：播放清單寬度不合法",
+    "other": "播放清單寬度必須為 200-360 像素"
+  },
+  "settings.error.unknown": {
+    "description": "系統設定 - 驗證：存在未知設定項",
+    "other": "存在未知的設定項"
   },
 
   "art.player": {

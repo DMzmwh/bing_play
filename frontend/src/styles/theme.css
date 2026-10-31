@@ -1,0 +1,49 @@
+/* 全局界面主题变量：由设置中的“界面主题”切换 data-theme 驱动 */
+:root,
+:root[data-theme='dark'] {
+    --app-bg: #0b0f14;
+    --app-surface: #0f1620;
+    --app-panel: #101a24;
+    --app-border: #1d2733;
+    --app-border-soft: #182230;
+    --app-text: #ffffff;
+    --app-text-strong: #e3eaf1;
+    --app-text-muted: #9fb0c0;
+    --app-text-dim: #6f8296;
+    --app-hover: #1a2430;
+    --app-hover-row: #182230;
+    --app-active-row: #1e2a3a;
+    --app-table-header: #0f1620;
+    --app-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    --app-danger: #f87171;
+    --app-icon: #33475c;
+    --app-icon-line: #27394b;
+    color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+    --app-bg: #f4f6f9;
+    --app-surface: #ffffff;
+    --app-panel: #ffffff;
+    --app-border: #d9e1ea;
+    --app-border-soft: #e8edf3;
+    --app-text: #1f2937;
+    --app-text-strong: #111827;
+    --app-text-muted: #52606d;
+    --app-text-dim: #7b8794;
+    --app-hover: #eef2f7;
+    --app-hover-row: #f3f6fa;
+    --app-active-row: #e6f0fb;
+    --app-table-header: #f4f6f9;
+    --app-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+    --app-danger: #dc2626;
+    --app-icon: #9aa9b8;
+    --app-icon-line: #c8d3df;
+    color-scheme: light;
+}
+
+html,
+body {
+    background: var(--app-bg);
+    color: var(--app-text);
+}

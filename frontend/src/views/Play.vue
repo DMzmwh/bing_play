@@ -1,7 +1,7 @@
 <template>
     <div class="play">
         <!-- 左侧播放列表 -->
-        <div class="left-panel">
+        <div class="left-panel" :style="{ width: `${sidebarWidth}px` }">
             <div class="title">播放列表 [{{ playlist.length }}]</div>
 
             <!-- <div class="search">
@@ -42,6 +42,9 @@
             </div>
         </div>
 
+        <!-- 拖动调整播放列表宽度，松开后自动保存 -->
+        <div class="resize-handle" @mousedown="onResizeStart" />
+
         <!-- 中间播放区 -->
         <div
             id="play-drop-area"
@@ -53,12 +56,13 @@
             @drop.prevent="dragOver = false"
         >
             <ArtPlayer
+                ref="playerRef"
                 v-if="videoUrl"
                 :url="videoUrl"
                 :options="playerOptions"
                 :has-prev="canPlayPrev"
                 :has-next="canPlayNext"
-                autoplay
+                :autoplay="pageActive"
                 @fullscreen-web="syncWindowMaximise"
                 @prev="playPrev"
                 @next="playNext"
@@ -88,8 +92,16 @@
 <script lang="ts" setup>
 import { Window, Events } from '@wailsio/runtime'
 import { CaretDown, CaretForward } from '@vicons/ionicons5'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { useMessage } from 'naive-ui'
 import { i18nState, t } from '@/i18n'
+import {
+    SettingKeys,
+    activeAccentColor,
+    loadSettings,
+    saveSettingValue,
+    settingNumber
+} from '@/settings'
 import {
     ListPlaylist
 } from '../../bindings/github.com/bing/bing-play/internal/service/videoservice'
@@ -108,6 +120,13 @@ const VIDEO_OPEN_FAILED_EVENT = 'video:open-failed'
 /** video:opened 事件载荷：current 为立即播放的视频 */
 interface VideoOpenedPayload {
     current?: OpenVideoResult
+}
+
+/** ArtPlayer 组件对外暴露的控制方法，用于页面切换时暂停/恢复 */
+interface PlayerExpose {
+    isPlaying: () => boolean
+    play: () => Promise<void> | undefined
+    pause: () => void
 }
 
 /** 分组后的播放列表，组名为 resourceName */
@@ -188,6 +207,69 @@ const videoUrl = computed(() =>
 const dragOver = ref(false)
 const errorMsg = ref('')
 
+const message = useMessage()
+
+/** 播放器组件实例，用于页面切走时暂停、切回时恢复 */
+const playerRef = ref<PlayerExpose | null>(null)
+/** 当前是否停留在播放页，离开时不自动播放新视频 */
+const pageActive = ref(true)
+/** 离开页面时是否正在播放；切回后仅恢复原本正在播放的视频 */
+let resumeOnActivate = false
+
+/** 切到其它 tab：记录播放状态并暂停，避免后台播放占用资源 */
+onDeactivated(() => {
+    pageActive.value = false
+    resumeOnActivate = playerRef.value?.isPlaying() ?? false
+    if (resumeOnActivate) playerRef.value?.pause()
+})
+
+/** 切回播放页：若离开前正在播放，则自动继续播放 */
+onActivated(() => {
+    pageActive.value = true
+    if (!resumeOnActivate) return
+    resumeOnActivate = false
+    void playerRef.value?.play()
+})
+
+/** 播放列表宽度，拖动分隔条后保存到设置 */
+const sidebarWidth = ref(settingNumber(SettingKeys.sidebarWidth, 260))
+/** 拖动分隔条时的起始鼠标位置与起始宽度 */
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+/** 限制播放列表宽度范围，与后端设置项校验保持一致 */
+function clampSidebarWidth(value: number) {
+    return Math.min(360, Math.max(200, value))
+}
+
+function onResizeStart(event: MouseEvent) {
+    if (event.button !== 0) return
+    resizeStartX = event.clientX
+    resizeStartWidth = sidebarWidth.value
+    window.addEventListener('mousemove', onResizeMove)
+    window.addEventListener('mouseup', onResizeEnd)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+}
+
+function onResizeMove(event: MouseEvent) {
+    sidebarWidth.value = clampSidebarWidth(resizeStartWidth + event.clientX - resizeStartX)
+}
+
+/** 松开鼠标后把新宽度写入设置，失败时提示并保留本地宽度 */
+function onResizeEnd() {
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup', onResizeEnd)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+
+    void saveSettingValue(SettingKeys.sidebarWidth, String(Math.round(sidebarWidth.value))).then(
+        (ok) => {
+            if (!ok) message.error(t('settings.save_failed'))
+        }
+    )
+}
+
 /** 播放器配置；ArtPlayer 文案格式为 { 语言代码: { 原生key: 文案 } }，语言由 lang 选项决定 */
 const playerOptions = computed(() => {
     // ArtPlayer 内部会对 lang 做 lowerCase 匹配，语言文件里的分组 key 也统一用小写
@@ -195,7 +277,7 @@ const playerOptions = computed(() => {
     return {
         fullscreen: true,
         fullscreenWeb: true,
-        theme: '#3b82f6',
+        theme: activeAccentColor.value,
         lang,
         i18n: { [lang]: { ...i18nState.playerMessages } }
     }
@@ -264,7 +346,11 @@ async function fetchPlaylist() {
     }
 }
 
-onMounted(() => {
+onMounted(async () => {
+    // 读取设置中的播放列表宽度，未保存过时使用默认值
+    await loadSettings()
+    sidebarWidth.value = clampSidebarWidth(settingNumber(SettingKeys.sidebarWidth, 260))
+
     void fetchPlaylist()
 
     // 拖拽由 Go 侧处理（路径本来就在 Go 手里），前端只接收结果
@@ -288,6 +374,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
     offVideoOpened?.()
     offVideoOpenFailed?.()
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup', onResizeEnd)
 })
 
 // 进入播放器网页全屏前窗口是否已最大化，用于退出时恢复
@@ -319,16 +407,29 @@ async function syncWindowMaximise(state: boolean) {
 }
 
 .left-panel {
-    flex: 0 0 260px; /* ✅ flex简写：grow 0 shrink 0 basis 260px，固定宽度 */
+    flex: 0 0 auto; /* 宽度由拖动分隔条控制并保存到设置 */
+    box-sizing: border-box;
     min-height: 0;
-    border-right: 1px solid #1d2733;
+    border-right: 1px solid var(--app-border);
     padding: 10px;
     overflow-y: auto;
     overflow-x: hidden;
 }
 
+/* 播放列表与播放区之间的拖动分隔条 */
+.resize-handle {
+    flex: 0 0 4px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.resize-handle:hover {
+    background: var(--app-accent, #3b82f6);
+}
+
 .title {
-    color: #fff;
+    color: var(--app-text);
     margin-bottom: 10px;
     flex-shrink: 0; // 固定不压缩
 }
@@ -340,7 +441,7 @@ async function syncWindowMaximise(state: boolean) {
 }
 
 .search :deep(.n-input) {
-    background: #111827;
+    background: var(--app-surface);
     border-radius: 6px;
 }
 
@@ -350,14 +451,14 @@ async function syncWindowMaximise(state: boolean) {
     align-items: center;
     gap: 4px;
     margin-top: 10px;
-    color: #999;
+    color: var(--app-text-dim);
     font-size: 12px;
     cursor: pointer;
     user-select: none;
 }
 
 .group-title:hover {
-    color: #ddd;
+    color: var(--app-text-muted);
 }
 
 .group-name {
@@ -372,7 +473,7 @@ async function syncWindowMaximise(state: boolean) {
     padding: 6px;
     font-size: 12px;
     cursor: pointer;
-    color: #bbb;
+    color: var(--app-text-muted);
 }
 
 .episode .name {
@@ -384,12 +485,12 @@ async function syncWindowMaximise(state: boolean) {
 }
 
 .episode:hover {
-    background: #182230;
+    background: var(--app-hover-row);
 }
 
 .episode.active {
-    background: #1e2a3a;
-    color: #fff;
+    background: var(--app-active-row);
+    color: var(--app-text);
 }
 
 /* center */
@@ -404,7 +505,7 @@ async function syncWindowMaximise(state: boolean) {
 
 /* 系统拖拽进入播放区域时的高亮，类名由 Wails 运行时自动添加 */
 .center.file-drop-target-active {
-    outline: 2px dashed #3b82f6;
+    outline: 2px dashed var(--app-accent, #3b82f6);
     outline-offset: -6px;
 }
 
@@ -434,7 +535,7 @@ async function syncWindowMaximise(state: boolean) {
     height: 64px;
     margin-bottom: 14px;
     fill: none;
-    stroke: #33475c;
+    stroke: var(--app-icon);
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -442,30 +543,30 @@ async function syncWindowMaximise(state: boolean) {
 
 .empty-icon .film-holes,
 .empty-icon .film-line {
-    stroke: #27394b;
+    stroke: var(--app-icon-line);
     stroke-width: 1.4;
 }
 
 .empty-icon .play-triangle {
-    fill: #3b82f6;
+    fill: var(--app-accent, #3b82f6);
     stroke: none;
 }
 
 .empty-title {
     font-size: 14px;
-    color: #9fb0c0;
+    color: var(--app-text-muted);
 }
 
 .empty-hint {
     margin-top: 6px;
     font-size: 12px;
-    color: #5f7183;
+    color: var(--app-text-dim);
 }
 
 .drop-tip {
     top: 16px;
     color: #fff;
-    background: rgba(59, 130, 246, 0.85);
+    background: var(--app-accent-soft, rgba(59, 130, 246, 0.85));
 }
 
 .error-tip {

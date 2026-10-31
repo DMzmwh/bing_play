@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/DMzmwh/bing-dhtcrawler/crawler"
@@ -15,6 +17,7 @@ import (
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/settings"
 	boom "github.com/tylertreat/BoomFilters"
 	"go.uber.org/fx"
 )
@@ -37,12 +40,15 @@ type NodeRecord struct {
 type Service struct {
 	cfg         *config.Config
 	resourceDAO *dao.ResourceDAO
+	settingDAO  *dao.AppSettingDAO
 	cancel      context.CancelFunc
+	mu          sync.Mutex
 }
 
 // NewService 注册到 Fx 生命周期，应用启动即自动拉起爬虫。
-func NewService(lc fx.Lifecycle, cfg *config.Config, resourceDAO *dao.ResourceDAO) *Service {
-	s := &Service{cfg: cfg, resourceDAO: resourceDAO}
+// 是否启用与监听端口优先取 app_settings 中的设置，没有设置时使用启动配置。
+func NewService(lc fx.Lifecycle, cfg *config.Config, resourceDAO *dao.ResourceDAO, settingDAO *dao.AppSettingDAO) *Service {
+	s := &Service{cfg: cfg, resourceDAO: resourceDAO, settingDAO: settingDAO}
 
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
@@ -59,7 +65,21 @@ func NewService(lc fx.Lifecycle, cfg *config.Config, resourceDAO *dao.ResourceDA
 }
 
 func (s *Service) start() {
-	if s.cfg == nil || !s.cfg.CrawlerEnabled {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startCrawler()
+}
+
+// ReloadCrawler 设置变更后立即按最新配置重启爬虫，无需等待应用重启。
+func (s *Service) ReloadCrawler() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopCrawler()
+	s.startCrawler()
+}
+
+func (s *Service) startCrawler() {
+	if s.cfg == nil {
 		logger.App.Info("DHT 爬虫未启用，跳过启动")
 		return
 	}
@@ -67,13 +87,19 @@ func (s *Service) start() {
 		return
 	}
 
+	enabled, port := s.runtimeOptions()
+	if !enabled {
+		logger.App.Info("DHT 爬虫未启用，跳过启动")
+		return
+	}
+
 	store := NewResourceStorage(s.resourceDAO)
 
-	client, err := newDHTClient(s.cfg.CrawlerPort)
+	client, err := newDHTClient(port)
 	if err != nil {
 		logger.Error.Error("DHT 爬虫启动失败：DHT 客户端创建失败",
 			slog.String("err", err.Error()),
-			slog.Int("udp_port", s.cfg.CrawlerPort),
+			slog.Int("udp_port", port),
 		)
 		return
 	}
@@ -103,7 +129,7 @@ func (s *Service) start() {
 
 	logger.App.Info("DHT 爬虫已启动",
 		slog.String("storage", "resources 表"),
-		slog.Int("udp_port", s.cfg.CrawlerPort),
+		slog.Int("udp_port", port),
 	)
 
 	go func() {
@@ -112,7 +138,44 @@ func (s *Service) start() {
 	}()
 }
 
+// runtimeOptions 优先读取 app_settings 中的爬虫分组配置，读取失败时使用启动配置。
+func (s *Service) runtimeOptions() (bool, int) {
+	enabled := s.cfg.CrawlerEnabled
+	port := s.cfg.CrawlerPort
+
+	if raw, err := s.settingDAO.Get(settings.KeyCrawler); err == nil && raw != "" {
+		if parsed, ok := settings.ParseCrawlerSettings(raw); ok {
+			if parsed.Enabled != nil {
+				enabled = *parsed.Enabled
+			}
+			if parsed.Port != nil && *parsed.Port >= 1024 && *parsed.Port <= 65535 {
+				port = *parsed.Port
+			}
+		}
+	} else {
+		// 兼容旧版本分散存储的扁平键
+		if value, err := s.settingDAO.Get(settings.KeyCrawlerEnabled); err == nil && value != "" {
+			if parsed, err := strconv.ParseBool(value); err == nil {
+				enabled = parsed
+			}
+		}
+		if value, err := s.settingDAO.Get(settings.KeyCrawlerPort); err == nil && value != "" {
+			if parsed, err := strconv.Atoi(value); err == nil && parsed >= 1024 && parsed <= 65535 {
+				port = parsed
+			}
+		}
+	}
+
+	return enabled, port
+}
+
 func (s *Service) stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopCrawler()
+}
+
+func (s *Service) stopCrawler() {
 	if s.cancel == nil {
 		return
 	}

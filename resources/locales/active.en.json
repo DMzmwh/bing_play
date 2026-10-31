@@ -42,6 +42,14 @@
     "description": "top navigation - find videos",
     "other": "Explore"
   },
+  "nav.resources": {
+    "description": "top navigation - crawled torrent resources",
+    "other": "Torrents"
+  },
+  "nav.settings": {
+    "description": "top navigation - system settings",
+    "other": "Settings"
+  },
 
   "video.drop_tip": {
     "description": "player - shown while dragging a file over the play area",
@@ -71,6 +79,34 @@
     "description": "dropped video - fallback for internal failures while registering the resource",
     "other": "Failed to open video"
   },
+  "video.error_query_failed": {
+    "description": "video playback - failed to load the resource",
+    "other": "Failed to load video information"
+  },
+  "video.error_file_required": {
+    "description": "video playback - no file inside the torrent specified",
+    "other": "Please select a file to play"
+  },
+  "video.error_stat_failed": {
+    "description": "video playback - failed to read file information",
+    "other": "Failed to read video information"
+  },
+  "video.error_service_unavailable": {
+    "description": "video playback - download service not initialized",
+    "other": "Download service is not initialized, please restart the app"
+  },
+  "video.error_task_paused": {
+    "description": "video playback - download task is paused",
+    "other": "Task is paused, please resume the download before playing"
+  },
+  "video.error_metadata_not_ready": {
+    "description": "video playback - torrent metadata is not ready",
+    "other": "Torrent metadata is not ready yet, please try again later"
+  },
+  "video.error_no_playable_file": {
+    "description": "video playback - no playable file found in the torrent",
+    "other": "No playable video file found"
+  },
   "video.empty_title": {
     "description": "player - empty state title when no video is loaded",
     "other": "Drop a video to start playing"
@@ -92,6 +128,493 @@
   "update.available": {
     "description": "updater - a new version is available, param Version",
     "other": "New version available: {{.Version}}"
+  },
+
+  "resources.search_placeholder": {
+    "description": "torrent list - search input placeholder",
+    "other": "Search by resource name or InfoHash"
+  },
+  "resources.sort.latest": {
+    "description": "torrent list - sort by created time, newest first",
+    "other": "Newest first"
+  },
+  "resources.sort.oldest": {
+    "description": "torrent list - sort by created time, oldest first",
+    "other": "Oldest first"
+  },
+  "resources.sort.largest": {
+    "description": "torrent list - sort by size, largest first",
+    "other": "Largest first"
+  },
+  "resources.sort.smallest": {
+    "description": "torrent list - sort by size, smallest first",
+    "other": "Smallest first"
+  },
+  "resources.col.index": {
+    "description": "torrent list - column header: row number",
+    "other": "No."
+  },
+  "resources.col.name": {
+    "description": "torrent list - column header: resource title",
+    "other": "Title"
+  },
+  "resources.col.size": {
+    "description": "torrent list - column header: total size",
+    "other": "Size"
+  },
+  "resources.col.info_hash": {
+    "description": "torrent list - column header: InfoHash",
+    "other": "InfoHash"
+  },
+  "resources.copy": {
+    "description": "torrent list - copy magnet link button tooltip",
+    "other": "Copy magnet link"
+  },
+  "resources.copy_success": {
+    "description": "torrent list - copy success message",
+    "other": "Magnet link copied"
+  },
+  "resources.copy_failed": {
+    "description": "torrent list - copy failure message",
+    "other": "Copy failed, please copy manually"
+  },
+  "resources.col.status": {
+    "description": "torrent list - column header: data status",
+    "other": "Status"
+  },
+  "resources.col.created": {
+    "description": "torrent list - column header: created time",
+    "other": "Created"
+  },
+  "resources.total": {
+    "description": "torrent list - total count hint, param Count",
+    "other": "{{.Count}} items"
+  },
+  "resources.empty_title": {
+    "description": "torrent list - empty state title",
+    "other": "No resources yet"
+  },
+  "resources.empty_hint": {
+    "description": "torrent list - empty state hint",
+    "other": "The crawler runs in the background, check back later"
+  },
+  "resources.search_empty_title": {
+    "description": "torrent list - no search result title",
+    "other": "No matching resources"
+  },
+  "resources.search_empty_hint": {
+    "description": "torrent list - no search result hint",
+    "other": "Try another keyword"
+  },
+  "resources.load_failed": {
+    "description": "torrent list - failed to load the list",
+    "other": "Failed to load the resource list"
+  },
+  "resources.status.not_downloaded": {
+    "description": "torrent list - status: not downloaded",
+    "other": "Not downloaded"
+  },
+  "resources.status.exists": {
+    "description": "torrent list - status: file exists locally",
+    "other": "Downloaded"
+  },
+  "resources.status.missing": {
+    "description": "torrent list - status: local file is missing",
+    "other": "Missing"
+  },
+  "resources.status.corrupted": {
+    "description": "torrent list - status: local file is corrupted",
+    "other": "Corrupted"
+  },
+  "resources.status.deleted": {
+    "description": "torrent list - status: local file deleted",
+    "other": "Deleted"
+  },
+  "resources.status.download_meta_info": {
+    "description": "torrent list - status: fetching metadata",
+    "other": "Fetching metadata"
+  },
+  "resources.status.queued": {
+    "description": "torrent list - status: queued",
+    "other": "Queued"
+  },
+  "resources.status.downloading": {
+    "description": "torrent list - status: downloading",
+    "other": "Downloading"
+  },
+  "resources.status.paused": {
+    "description": "torrent list - status: paused",
+    "other": "Paused"
+  },
+  "resources.status.completed": {
+    "description": "torrent list - status: completed",
+    "other": "Completed"
+  },
+  "resources.status.failed": {
+    "description": "torrent list - status: failed",
+    "other": "Failed"
+  },
+  "resources.status.cancelled": {
+    "description": "torrent list - status: cancelled",
+    "other": "Cancelled"
+  },
+  "resources.status.unknown": {
+    "description": "torrent list - status: unknown",
+    "other": "Unknown"
+  },
+
+  "resources.batch_download": {
+    "description": "torrent list - button: download selected resources",
+    "other": "Batch download"
+  },
+  "resources.batch_selected": {
+    "description": "torrent list - selected count",
+    "other": "{{.Count}} selected"
+  },
+  "resources.batch_clear": {
+    "description": "torrent list - button: clear selection",
+    "other": "Clear"
+  },
+  "resources.batch_empty": {
+    "description": "torrent list - hint: no resource selected",
+    "other": "Select at least one resource first"
+  },
+  "resources.batch_result": {
+    "description": "torrent list - batch download result",
+    "other": "Added {{.Added}}, skipped {{.Skipped}}, failed {{.Failed}}"
+  },
+  "resources.batch_failed": {
+    "description": "torrent list - partial batch failure",
+    "other": "Some resources could not be queued: {{.Reason}}"
+  },
+
+  "download.title": {
+    "description": "download center - page title",
+    "other": "Downloads"
+  },
+  "download.subtitle": {
+    "description": "download center - page description",
+    "other": "View and manage all download tasks"
+  },
+  "download.empty_title": {
+    "description": "download center - empty title",
+    "other": "No download tasks"
+  },
+  "download.empty_hint": {
+    "description": "download center - empty hint",
+    "other": "Select resources on the torrent list page and click \"Batch download\""
+  },
+  "download.tab_active": {
+    "description": "download center - tab: downloading",
+    "other": "Downloading"
+  },
+  "download.tab_completed": {
+    "description": "download center - tab: completed",
+    "other": "Completed"
+  },
+  "download.completed_time_label": {
+    "description": "download center - column: completed time",
+    "other": "Completed at"
+  },
+  "download.completed_empty_title": {
+    "description": "download center - completed list empty title",
+    "other": "No completed downloads"
+  },
+  "download.completed_empty_hint": {
+    "description": "download center - completed list empty hint",
+    "other": "Completed downloads will appear here"
+  },
+  "download.load_failed": {
+    "description": "download center - load failed",
+    "other": "Failed to load download tasks"
+  },
+  "download.refresh": {
+    "description": "download center - refresh button",
+    "other": "Refresh"
+  },
+  "download.config": {
+    "description": "download center - runtime options summary",
+    "other": "{{.MaxConcurrent}} concurrent tasks · retry up to {{.MaxRetries}} times"
+  },
+  "download.item_size": {
+    "description": "download center - task size",
+    "other": "{{.Downloaded}} / {{.Total}}"
+  },
+  "download.progress_label": {
+    "description": "download center - column: progress",
+    "other": "Progress"
+  },
+  "download.item_size_label": {
+    "description": "download center - column: size",
+    "other": "Size"
+  },
+  "download.speed_label": {
+    "description": "download center - column: speed",
+    "other": "Speed"
+  },
+  "download.eta_label": {
+    "description": "download center - column: ETA",
+    "other": "ETA"
+  },
+  "download.priority_label": {
+    "description": "download center - column: priority",
+    "other": "Priority"
+  },
+  "download.actions_label": {
+    "description": "download center - column: actions",
+    "other": "Actions"
+  },
+  "download.eta_unknown": {
+    "description": "download center - ETA unknown",
+    "other": "Unknown"
+  },
+  "download.eta_seconds": {
+    "description": "download center - ETA in seconds",
+    "other": "{{.Seconds}}s"
+  },
+  "download.eta_minutes": {
+    "description": "download center - ETA in minutes and seconds",
+    "other": "{{.Minutes}}m {{.Seconds}}s"
+  },
+  "download.eta_hours": {
+    "description": "download center - ETA in hours and minutes",
+    "other": "{{.Hours}}h {{.Minutes}}m"
+  },
+  "download.retry_count": {
+    "description": "download center - retry count",
+    "other": "Retried {{.Count}} times"
+  },
+  "download.action.pause": {
+    "description": "download center - pause button",
+    "other": "Pause"
+  },
+  "download.action.resume": {
+    "description": "download center - resume button",
+    "other": "Resume"
+  },
+  "download.action.retry": {
+    "description": "download center - retry button",
+    "other": "Retry"
+  },
+  "download.action.cancel": {
+    "description": "download center - cancel button",
+    "other": "Cancel task"
+  },
+  "download.action.priority_up": {
+    "description": "download center - raise priority button",
+    "other": "Raise priority"
+  },
+  "download.action.priority_down": {
+    "description": "download center - lower priority button",
+    "other": "Lower priority"
+  },
+  "download.cancel_confirm": {
+    "description": "download center - cancel confirmation",
+    "other": "Cancel this download task? Downloaded pieces will be kept."
+  },
+  "download.action_failed": {
+    "description": "download center - action failed",
+    "other": "Action failed: {{.Reason}}"
+  },
+  "download.error.task_not_found": {
+    "description": "download error - task not found",
+    "other": "Download task not found"
+  },
+  "download.error.magnet_empty": {
+    "description": "download error - empty magnet",
+    "other": "Magnet link cannot be empty"
+  },
+  "download.error.invalid_magnet": {
+    "description": "download error - invalid magnet",
+    "other": "Invalid magnet link"
+  },
+  "download.error.no_source": {
+    "description": "download error - no source",
+    "other": "No available download source"
+  },
+  "download.error.metadata_timeout": {
+    "description": "download error - metadata timeout",
+    "other": "Timed out fetching torrent metadata, the resource may be too cold"
+  },
+  "download.error.stalled": {
+    "description": "download error - stalled",
+    "other": "Download stalled, retrying automatically"
+  },
+  "download.error.download_failed": {
+    "description": "download error - generic failure",
+    "other": "Download failed, please try again later"
+  },
+  "download.error.permission": {
+    "description": "download error - permission denied",
+    "other": "No permission to write the download directory, please check the setting"
+  },
+  "download.error.no_space": {
+    "description": "download error - no disk space",
+    "other": "Not enough disk space to continue downloading"
+  },
+  "download.error.resource_gone": {
+    "description": "download error - resource gone",
+    "other": "The resource is no longer available"
+  },
+  "download.error.network": {
+    "description": "download error - network issue",
+    "other": "Network connection error, retrying automatically"
+  },
+
+  "settings.title": {
+    "description": "system settings - page title",
+    "other": "System Settings"
+  },
+  "settings.subtitle": {
+    "description": "system settings - page description",
+    "other": "Manage application behavior and appearance"
+  },
+  "settings.category.general": {
+    "description": "system settings - category: general",
+    "other": "General"
+  },
+  "settings.category.interface": {
+    "description": "system settings - category: interface",
+    "other": "Interface"
+  },
+
+  "settings.item.language": {
+    "description": "system settings - item: interface language",
+    "other": "Interface Language"
+  },
+  "settings.help.language": {
+    "description": "system settings - help: interface language",
+    "other": "Choose the language used by the application and player controls"
+  },
+  "settings.item.download_dir": {
+    "description": "system settings - item: download directory",
+    "other": "Download Directory"
+  },
+  "settings.help.download_dir": {
+    "description": "system settings - help: download directory",
+    "other": "Where downloaded torrent files are saved; changes apply to new tasks"
+  },
+  "settings.browse": {
+    "description": "system settings - button: browse for a directory",
+    "other": "Browse"
+  },
+  "settings.download_dir_dialog_title": {
+    "description": "system settings - directory picker title",
+    "other": "Select Download Directory"
+  },
+  "settings.download_dir_pick_failed": {
+    "description": "system settings - message: failed to open directory picker",
+    "other": "Failed to open the directory picker"
+  },
+  "settings.item.crawler_enabled": {
+    "description": "system settings - item: auto start DHT crawler",
+    "other": "Auto Start DHT Crawler"
+  },
+  "settings.help.crawler_enabled": {
+    "description": "system settings - help: auto start DHT crawler",
+    "other": "Connect to the DHT network and crawl torrents on startup. Changes take effect immediately"
+  },
+  "settings.item.crawler_port": {
+    "description": "system settings - item: crawler port",
+    "other": "Crawler Port"
+  },
+  "settings.help.crawler_port": {
+    "description": "system settings - help: crawler port",
+    "other": "UDP port used by the DHT crawler, range 1024-65535. Changes take effect immediately"
+  },
+  "settings.item.theme_mode": {
+    "description": "system settings - item: interface theme",
+    "other": "Interface Theme"
+  },
+  "settings.help.theme_mode": {
+    "description": "system settings - help: interface theme",
+    "other": "Switch the overall color scheme of the app, affecting backgrounds, text and components"
+  },
+  "settings.theme.dark": {
+    "description": "system settings - theme option: dark",
+    "other": "Dark"
+  },
+  "settings.theme.light": {
+    "description": "system settings - theme option: light",
+    "other": "Light"
+  },
+  "settings.item.accent_color": {
+    "description": "system settings - item: accent color",
+    "other": "Accent Color"
+  },
+  "settings.help.accent_color": {
+    "description": "system settings - help: accent color",
+    "other": "Accent color used by buttons, selected states and the player theme"
+  },
+
+  "settings.save": {
+    "description": "system settings - button: save",
+    "other": "Save Settings"
+  },
+  "settings.reset": {
+    "description": "system settings - button: reset to defaults",
+    "other": "Reset to Defaults"
+  },
+  "settings.reset_confirm": {
+    "description": "system settings - reset confirmation",
+    "other": "Reset all settings to their default values?"
+  },
+  "settings.save_success": {
+    "description": "system settings - toast: saved",
+    "other": "Settings saved"
+  },
+  "settings.save_failed": {
+    "description": "system settings - toast: save failed",
+    "other": "Save failed. Please check the settings"
+  },
+  "settings.reset_success": {
+    "description": "system settings - toast: reset succeeded",
+    "other": "Default settings restored"
+  },
+  "settings.reset_failed": {
+    "description": "system settings - toast: reset failed",
+    "other": "Failed to reset settings"
+  },
+  "settings.load_failed": {
+    "description": "system settings - toast: load failed",
+    "other": "Failed to load settings"
+  },
+
+  "settings.error.language": {
+    "description": "system settings - validation: unsupported language",
+    "other": "Please choose a supported interface language"
+  },
+  "settings.error.theme_mode": {
+    "description": "system settings - validation: unsupported theme",
+    "other": "Please choose a supported interface theme"
+  },
+  "settings.error.download_dir": {
+    "description": "system settings - validation: download directory unavailable",
+    "other": "Download directory is unavailable, please enter an existing or creatable folder"
+  },
+  "settings.error.boolean": {
+    "description": "system settings - validation: invalid boolean",
+    "other": "Invalid switch value"
+  },
+  "settings.error.port": {
+    "description": "system settings - validation: invalid port",
+    "other": "Port must be an integer between 1024 and 65535"
+  },
+  "settings.error.page_size": {
+    "description": "system settings - validation: invalid page size",
+    "other": "Page size must be 50, 100 or 200"
+  },
+  "settings.error.color": {
+    "description": "system settings - validation: invalid color",
+    "other": "Color must be in #RRGGBB format"
+  },
+  "settings.error.sidebar_width": {
+    "description": "system settings - validation: invalid playlist width",
+    "other": "Playlist width must be between 200 and 360 pixels"
+  },
+  "settings.error.unknown": {
+    "description": "system settings - validation: unknown setting",
+    "other": "Unknown setting detected"
   },
 
   "art.player": {

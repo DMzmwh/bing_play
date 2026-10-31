@@ -166,6 +166,14 @@ watch(
   { deep: true }
 )
 
+/** 强调色变化时同步播放器主题，无需重建实例 */
+watch(
+  () => props.options.theme,
+  (theme) => {
+    if (player.value && theme) player.value.theme = theme
+  }
+)
+
 /** 重建播放器并恢复播放状态，用于文案变化等必须重新初始化的场景 */
 function recreatePlayer(): void {
   const art = player.value
@@ -228,7 +236,9 @@ defineExpose({
   setVolume,
   screenshot,
   getCurrentTime: (): number => player.value?.currentTime ?? 0,
-  getDuration: (): number => player.value?.duration ?? 0
+  getDuration: (): number => player.value?.duration ?? 0,
+  /** 是否正在播放，供页面切换时判断是否需要暂停/恢复 */
+  isPlaying: (): boolean => Boolean(player.value?.playing)
 })
 </script>
 

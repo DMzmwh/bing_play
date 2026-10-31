@@ -42,6 +42,14 @@
     "description": "顶部导航 - 找片",
     "other": "找片"
   },
+  "nav.resources": {
+    "description": "顶部导航 - 已爬取的种子资源列表",
+    "other": "种子资源"
+  },
+  "nav.settings": {
+    "description": "顶部导航 - 系统设置",
+    "other": "设置"
+  },
 
   "video.drop_tip": {
     "description": "播放区 - 拖入文件时提示松开",
@@ -71,6 +79,34 @@
     "description": "拖入视频 - 登记资源内部失败兜底",
     "other": "打开视频失败"
   },
+  "video.error_query_failed": {
+    "description": "播放视频 - 查询资源失败",
+    "other": "查询视频信息失败"
+  },
+  "video.error_file_required": {
+    "description": "播放视频 - 未指定种子内的文件",
+    "other": "请选择要播放的文件"
+  },
+  "video.error_stat_failed": {
+    "description": "播放视频 - 读取文件信息失败",
+    "other": "获取视频信息失败"
+  },
+  "video.error_service_unavailable": {
+    "description": "播放视频 - 下载服务未初始化",
+    "other": "下载服务未初始化，请重启应用"
+  },
+  "video.error_task_paused": {
+    "description": "播放视频 - 下载任务已暂停",
+    "other": "任务已暂停，请继续下载后再播放"
+  },
+  "video.error_metadata_not_ready": {
+    "description": "播放视频 - 种子元信息尚未就绪",
+    "other": "种子元信息尚未就绪，请稍后重试"
+  },
+  "video.error_no_playable_file": {
+    "description": "播放视频 - 种子内未找到可播放文件",
+    "other": "未找到可播放的视频文件"
+  },
   "video.empty_title": {
     "description": "播放区 - 无视频时的空状态标题",
     "other": "拖入视频开始播放"
@@ -92,6 +128,493 @@
   "update.available": {
     "description": "更新检测 - 发现新版本，参数 Version",
     "other": "发现新版本：{{.Version}}"
+  },
+
+  "resources.search_placeholder": {
+    "description": "种子资源列表 - 搜索框占位提示",
+    "other": "搜索资源名称或 InfoHash"
+  },
+  "resources.sort.latest": {
+    "description": "种子资源列表 - 排序：按创建时间倒序",
+    "other": "最新创建"
+  },
+  "resources.sort.oldest": {
+    "description": "种子资源列表 - 排序：按创建时间正序",
+    "other": "最早创建"
+  },
+  "resources.sort.largest": {
+    "description": "种子资源列表 - 排序：按体积从大到小",
+    "other": "体积从大到小"
+  },
+  "resources.sort.smallest": {
+    "description": "种子资源列表 - 排序：按体积从小到大",
+    "other": "体积从小到大"
+  },
+  "resources.col.index": {
+    "description": "种子资源列表 - 表头：行号序号",
+    "other": "序号"
+  },
+  "resources.col.name": {
+    "description": "种子资源列表 - 表头：资源标题",
+    "other": "资源标题"
+  },
+  "resources.col.size": {
+    "description": "种子资源列表 - 表头：资源大小",
+    "other": "大小"
+  },
+  "resources.col.info_hash": {
+    "description": "种子资源列表 - 表头：InfoHash",
+    "other": "InfoHash"
+  },
+  "resources.copy": {
+    "description": "种子资源列表 - 复制磁力链接按钮提示",
+    "other": "复制磁力链接"
+  },
+  "resources.copy_success": {
+    "description": "种子资源列表 - 复制成功提示",
+    "other": "磁力链接已复制"
+  },
+  "resources.copy_failed": {
+    "description": "种子资源列表 - 复制失败提示",
+    "other": "复制失败，请手动复制"
+  },
+  "resources.col.status": {
+    "description": "种子资源列表 - 表头：数据状态",
+    "other": "状态"
+  },
+  "resources.col.created": {
+    "description": "种子资源列表 - 表头：创建时间",
+    "other": "创建时间"
+  },
+  "resources.total": {
+    "description": "种子资源列表 - 总数提示，参数 Count",
+    "other": "共 {{.Count}} 条"
+  },
+  "resources.empty_title": {
+    "description": "种子资源列表 - 无数据时的空状态标题",
+    "other": "暂无爬取资源"
+  },
+  "resources.empty_hint": {
+    "description": "种子资源列表 - 无数据时的空状态说明",
+    "other": "爬虫会在后台自动抓取，稍后再来看看"
+  },
+  "resources.search_empty_title": {
+    "description": "种子资源列表 - 搜索无结果标题",
+    "other": "没有匹配的资源"
+  },
+  "resources.search_empty_hint": {
+    "description": "种子资源列表 - 搜索无结果说明",
+    "other": "换个关键词试试"
+  },
+  "resources.load_failed": {
+    "description": "种子资源列表 - 加载失败提示",
+    "other": "加载资源列表失败"
+  },
+  "resources.status.not_downloaded": {
+    "description": "种子资源列表 - 状态：未下载",
+    "other": "未下载"
+  },
+  "resources.status.exists": {
+    "description": "种子资源列表 - 状态：本地已存在",
+    "other": "本地已存在"
+  },
+  "resources.status.missing": {
+    "description": "种子资源列表 - 状态：本地文件丢失",
+    "other": "文件丢失"
+  },
+  "resources.status.corrupted": {
+    "description": "种子资源列表 - 状态：文件损坏",
+    "other": "文件损坏"
+  },
+  "resources.status.deleted": {
+    "description": "种子资源列表 - 状态：文件已删除",
+    "other": "文件已删除"
+  },
+  "resources.status.download_meta_info": {
+    "description": "种子资源列表 - 状态：获取元信息中",
+    "other": "获取元信息"
+  },
+  "resources.status.queued": {
+    "description": "种子资源列表 - 状态：等待下载",
+    "other": "等待下载"
+  },
+  "resources.status.downloading": {
+    "description": "种子资源列表 - 状态：下载中",
+    "other": "下载中"
+  },
+  "resources.status.paused": {
+    "description": "种子资源列表 - 状态：已暂停",
+    "other": "已暂停"
+  },
+  "resources.status.completed": {
+    "description": "种子资源列表 - 状态：已完成",
+    "other": "已完成"
+  },
+  "resources.status.failed": {
+    "description": "种子资源列表 - 状态：失败",
+    "other": "失败"
+  },
+  "resources.status.cancelled": {
+    "description": "种子资源列表 - 状态：已取消",
+    "other": "已取消"
+  },
+  "resources.status.unknown": {
+    "description": "种子资源列表 - 状态：未知",
+    "other": "未知"
+  },
+
+  "resources.batch_download": {
+    "description": "种子资源列表 - 按钮：批量下载选中资源",
+    "other": "批量下载"
+  },
+  "resources.batch_selected": {
+    "description": "种子资源列表 - 已选数量",
+    "other": "已选 {{.Count}} 项"
+  },
+  "resources.batch_clear": {
+    "description": "种子资源列表 - 按钮：清空选择",
+    "other": "清空选择"
+  },
+  "resources.batch_empty": {
+    "description": "种子资源列表 - 提示：未选择资源",
+    "other": "请先选择需要下载的资源"
+  },
+  "resources.batch_result": {
+    "description": "种子资源列表 - 批量下载结果",
+    "other": "已加入 {{.Added}} 个，跳过 {{.Skipped}} 个，失败 {{.Failed}} 个"
+  },
+  "resources.batch_failed": {
+    "description": "种子资源列表 - 批量下载部分失败提示",
+    "other": "部分资源加入下载队列失败：{{.Reason}}"
+  },
+
+  "download.title": {
+    "description": "下载中心 - 页面标题",
+    "other": "下载中心"
+  },
+  "download.subtitle": {
+    "description": "下载中心 - 页面说明",
+    "other": "查看与管理全部下载任务"
+  },
+  "download.empty_title": {
+    "description": "下载中心 - 空列表标题",
+    "other": "暂无下载任务"
+  },
+  "download.empty_hint": {
+    "description": "下载中心 - 空列表说明",
+    "other": "在种子资源页选择资源后点击「批量下载」即可开始"
+  },
+  "download.tab_active": {
+    "description": "下载中心 - 标签：下载中",
+    "other": "下载中"
+  },
+  "download.tab_completed": {
+    "description": "下载中心 - 标签：下载完成",
+    "other": "下载完成"
+  },
+  "download.completed_time_label": {
+    "description": "下载中心 - 列：完成时间",
+    "other": "完成时间"
+  },
+  "download.completed_empty_title": {
+    "description": "下载中心 - 已完成列表空状态标题",
+    "other": "暂无已完成任务"
+  },
+  "download.completed_empty_hint": {
+    "description": "下载中心 - 已完成列表空状态说明",
+    "other": "下载完成的任务会显示在这里"
+  },
+  "download.load_failed": {
+    "description": "下载中心 - 加载失败提示",
+    "other": "加载下载任务失败"
+  },
+  "download.refresh": {
+    "description": "下载中心 - 按钮：刷新任务列表",
+    "other": "刷新"
+  },
+  "download.config": {
+    "description": "下载中心 - 运行参数摘要",
+    "other": "同时下载 {{.MaxConcurrent}} 个任务 · 失败自动重试 {{.MaxRetries}} 次"
+  },
+  "download.item_size": {
+    "description": "下载中心 - 任务体积",
+    "other": "{{.Downloaded}} / {{.Total}}"
+  },
+  "download.progress_label": {
+    "description": "下载中心 - 列：进度",
+    "other": "进度"
+  },
+  "download.item_size_label": {
+    "description": "下载中心 - 列：大小",
+    "other": "大小"
+  },
+  "download.speed_label": {
+    "description": "下载中心 - 列：速度",
+    "other": "速度"
+  },
+  "download.eta_label": {
+    "description": "下载中心 - 列：剩余时间",
+    "other": "剩余时间"
+  },
+  "download.priority_label": {
+    "description": "下载中心 - 列：优先级",
+    "other": "优先级"
+  },
+  "download.actions_label": {
+    "description": "下载中心 - 列：操作",
+    "other": "操作"
+  },
+  "download.eta_unknown": {
+    "description": "下载中心 - 剩余时间无法估算",
+    "other": "无法估算"
+  },
+  "download.eta_seconds": {
+    "description": "下载中心 - 剩余时间：秒",
+    "other": "{{.Seconds}} 秒"
+  },
+  "download.eta_minutes": {
+    "description": "下载中心 - 剩余时间：分秒",
+    "other": "{{.Minutes}} 分 {{.Seconds}} 秒"
+  },
+  "download.eta_hours": {
+    "description": "下载中心 - 剩余时间：时分",
+    "other": "{{.Hours}} 小时 {{.Minutes}} 分"
+  },
+  "download.retry_count": {
+    "description": "下载中心 - 已重试次数",
+    "other": "已重试 {{.Count}} 次"
+  },
+  "download.action.pause": {
+    "description": "下载中心 - 按钮：暂停",
+    "other": "暂停"
+  },
+  "download.action.resume": {
+    "description": "下载中心 - 按钮：继续",
+    "other": "继续"
+  },
+  "download.action.retry": {
+    "description": "下载中心 - 按钮：重试",
+    "other": "重试"
+  },
+  "download.action.cancel": {
+    "description": "下载中心 - 按钮：取消",
+    "other": "取消任务"
+  },
+  "download.action.priority_up": {
+    "description": "下载中心 - 按钮：提高优先级",
+    "other": "提高优先级"
+  },
+  "download.action.priority_down": {
+    "description": "下载中心 - 按钮：降低优先级",
+    "other": "降低优先级"
+  },
+  "download.cancel_confirm": {
+    "description": "下载中心 - 取消任务确认",
+    "other": "确定取消该下载任务吗？已下载的分片会保留。"
+  },
+  "download.action_failed": {
+    "description": "下载中心 - 任务操作失败提示",
+    "other": "操作失败：{{.Reason}}"
+  },
+  "download.error.task_not_found": {
+    "description": "下载错误 - 任务不存在",
+    "other": "下载任务不存在"
+  },
+  "download.error.magnet_empty": {
+    "description": "下载错误 - 磁力链接为空",
+    "other": "磁力链接不能为空"
+  },
+  "download.error.invalid_magnet": {
+    "description": "下载错误 - 磁力链接无效",
+    "other": "磁力链接格式无效"
+  },
+  "download.error.no_source": {
+    "description": "下载错误 - 缺少下载来源",
+    "other": "缺少可用的下载来源"
+  },
+  "download.error.metadata_timeout": {
+    "description": "下载错误 - 获取元信息超时",
+    "other": "获取种子元信息超时，可能是资源热度不足"
+  },
+  "download.error.stalled": {
+    "description": "下载错误 - 下载停滞",
+    "other": "下载长时间没有进展，正在自动重试"
+  },
+  "download.error.download_failed": {
+    "description": "下载错误 - 通用失败",
+    "other": "下载失败，请稍后重试"
+  },
+  "download.error.permission": {
+    "description": "下载错误 - 权限不足",
+    "other": "没有写入下载目录的权限，请检查目录设置"
+  },
+  "download.error.no_space": {
+    "description": "下载错误 - 磁盘空间不足",
+    "other": "磁盘空间不足，无法继续下载"
+  },
+  "download.error.resource_gone": {
+    "description": "下载错误 - 资源失效",
+    "other": "资源已失效或文件不存在"
+  },
+  "download.error.network": {
+    "description": "下载错误 - 网络异常",
+    "other": "网络连接异常，正在自动重试"
+  },
+
+  "settings.title": {
+    "description": "系统设置 - 页面标题",
+    "other": "系统设置"
+  },
+  "settings.subtitle": {
+    "description": "系统设置 - 页面说明",
+    "other": "管理应用行为与界面外观"
+  },
+  "settings.category.general": {
+    "description": "系统设置 - 分组：通用设置",
+    "other": "通用设置"
+  },
+  "settings.category.interface": {
+    "description": "系统设置 - 分组：界面设置",
+    "other": "界面设置"
+  },
+
+  "settings.item.language": {
+    "description": "系统设置 - 设置项：界面语言",
+    "other": "界面语言"
+  },
+  "settings.help.language": {
+    "description": "系统设置 - 说明：界面语言",
+    "other": "选择应用界面与播放器控件使用的语言"
+  },
+  "settings.item.download_dir": {
+    "description": "系统设置 - 设置项：下载目录",
+    "other": "下载目录"
+  },
+  "settings.help.download_dir": {
+    "description": "系统设置 - 说明：下载目录",
+    "other": "磁力任务下载文件的保存位置，修改后对之后新建的任务生效"
+  },
+  "settings.browse": {
+    "description": "系统设置 - 按钮：浏览选择目录",
+    "other": "选择目录"
+  },
+  "settings.download_dir_dialog_title": {
+    "description": "系统设置 - 目录选择器标题",
+    "other": "选择下载目录"
+  },
+  "settings.download_dir_pick_failed": {
+    "description": "系统设置 - 提示：打开目录选择器失败",
+    "other": "打开目录选择器失败"
+  },
+  "settings.item.crawler_enabled": {
+    "description": "系统设置 - 设置项：自动启动 DHT 爬虫",
+    "other": "自动启动 DHT 爬虫"
+  },
+  "settings.help.crawler_enabled": {
+    "description": "系统设置 - 说明：自动启动 DHT 爬虫",
+    "other": "应用启动后自动连接 DHT 网络并抓取种子资源，修改后立即生效"
+  },
+  "settings.item.crawler_port": {
+    "description": "系统设置 - 设置项：爬虫监听端口",
+    "other": "爬虫监听端口"
+  },
+  "settings.help.crawler_port": {
+    "description": "系统设置 - 说明：爬虫监听端口",
+    "other": "DHT 爬虫使用的 UDP 端口，范围 1024-65535，修改后立即生效"
+  },
+  "settings.item.theme_mode": {
+    "description": "系统设置 - 设置项：界面主题模式",
+    "other": "界面主题"
+  },
+  "settings.help.theme_mode": {
+    "description": "系统设置 - 说明：界面主题模式",
+    "other": "切换应用的整体配色方案，影响背景、文字与组件外观"
+  },
+  "settings.theme.dark": {
+    "description": "系统设置 - 主题选项：深色",
+    "other": "深色"
+  },
+  "settings.theme.light": {
+    "description": "系统设置 - 主题选项：浅色",
+    "other": "浅色"
+  },
+  "settings.item.accent_color": {
+    "description": "系统设置 - 设置项：界面强调色",
+    "other": "界面强调色"
+  },
+  "settings.help.accent_color": {
+    "description": "系统设置 - 说明：界面强调色",
+    "other": "用于按钮、选中状态和播放器主题的强调色"
+  },
+
+  "settings.save": {
+    "description": "系统设置 - 按钮：保存设置",
+    "other": "保存设置"
+  },
+  "settings.reset": {
+    "description": "系统设置 - 按钮：重置为默认值",
+    "other": "重置为默认值"
+  },
+  "settings.reset_confirm": {
+    "description": "系统设置 - 重置确认提示",
+    "other": "确定要恢复所有设置为默认值吗？"
+  },
+  "settings.save_success": {
+    "description": "系统设置 - 提示：保存成功",
+    "other": "设置已保存"
+  },
+  "settings.save_failed": {
+    "description": "系统设置 - 提示：保存失败",
+    "other": "保存失败，请检查填写的设置项"
+  },
+  "settings.reset_success": {
+    "description": "系统设置 - 提示：重置成功",
+    "other": "已恢复默认设置"
+  },
+  "settings.reset_failed": {
+    "description": "系统设置 - 提示：重置失败",
+    "other": "重置设置失败"
+  },
+  "settings.load_failed": {
+    "description": "系统设置 - 提示：读取失败",
+    "other": "读取设置失败"
+  },
+
+  "settings.error.language": {
+    "description": "系统设置 - 校验：语言不受支持",
+    "other": "请选择受支持的界面语言"
+  },
+  "settings.error.theme_mode": {
+    "description": "系统设置 - 校验：界面主题不受支持",
+    "other": "请选择受支持的界面主题"
+  },
+  "settings.error.download_dir": {
+    "description": "系统设置 - 校验：下载目录不可用",
+    "other": "下载目录不可用，请填写存在或可创建的文件夹"
+  },
+  "settings.error.boolean": {
+    "description": "系统设置 - 校验：布尔值非法",
+    "other": "开关设置值不合法"
+  },
+  "settings.error.port": {
+    "description": "系统设置 - 校验：端口范围非法",
+    "other": "端口必须为 1024-65535 之间的整数"
+  },
+  "settings.error.page_size": {
+    "description": "系统设置 - 校验：每页条数非法",
+    "other": "每页条数只能选择 50、100 或 200"
+  },
+  "settings.error.color": {
+    "description": "系统设置 - 校验：颜色格式非法",
+    "other": "颜色格式必须为 #RRGGBB"
+  },
+  "settings.error.sidebar_width": {
+    "description": "系统设置 - 校验：播放列表宽度非法",
+    "other": "播放列表宽度必须为 200-360 像素"
+  },
+  "settings.error.unknown": {
+    "description": "系统设置 - 校验：存在未知设置项",
+    "other": "存在未知的设置项"
   },
 
   "art.player": {
