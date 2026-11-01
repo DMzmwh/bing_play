@@ -122,18 +122,25 @@ func (d *ResourceDAO) GetByIDs(ids []int64) ([]models.Resource, error) {
 	return list, err
 }
 
-// downloadTaskStates 下载页需要展示的任务状态，Discovered（仅爬虫发现）与本地视频不在其中。
-var downloadTaskStates = []models.TaskState{
-	models.TaskPreparing,
-	models.TaskQueued,
-	models.TaskDownloading,
-	models.TaskPaused,
-	models.TaskVerifying,
-	models.TaskRetryWait,
-	models.TaskCompleted,
-	models.TaskFailed,
-	models.TaskCancelled,
+// taskStatesWhere 按状态机的判定条件生成状态切片，避免状态集合在多处重复维护。
+func taskStatesWhere(keep func(models.TaskState) bool) []models.TaskState {
+	out := make([]models.TaskState, 0, models.TaskStateCount)
+	for state := models.TaskState(0); state < models.TaskStateCount; state++ {
+		if keep(state) {
+			out = append(out, state)
+		}
+	}
+	return out
 }
+
+// pendingTaskStates 下载页「待下载」列表状态：用户触发过下载且未完成的任务。
+// 数据库是该集合的唯一事实源，异常中断的任务不会被自动移出。
+var pendingTaskStates = taskStatesWhere(models.TaskState.Pending)
+
+// downloadTaskStates 下载页需要展示的任务状态，Discovered（仅爬虫发现）与本地视频不在其中。
+var downloadTaskStates = taskStatesWhere(func(state models.TaskState) bool {
+	return state.Pending() || state == models.TaskCompleted
+})
 
 // int8Slice 把强类型状态枚举转成驱动可直接绑定的切片。
 func int8Slice[T ~int8](values []T) []int8 {
@@ -153,6 +160,14 @@ func (d *ResourceDAO) ListDownloadTasks() ([]models.Resource, error) {
 		Find(&list).
 		Error
 	return list, err
+}
+
+// ListPendingTasks 查询下载页「待下载」列表的全部任务。
+//
+// 包含所有用户已触发下载且尚未完成的状态（含 Failed / Cancelled），
+// 作为待下载队列的持久化事实源：应用重启或异常中断后任务不会从列表丢失。
+func (d *ResourceDAO) ListPendingTasks() ([]models.Resource, error) {
+	return d.ListByTaskStates(pendingTaskStates)
 }
 
 // ListCompletedTasks 查询已完成的种子下载任务，用于下载页"已完成"标签页。

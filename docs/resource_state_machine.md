@@ -453,14 +453,19 @@ WHERE id = ? AND state_version = ?;
 | `Preparing` | `Preparing` | 重新挂载 Torrent，保留 `Attempt` |
 | `Queued` | `Queued` | 元信息缓存存在；缺失则降级 `Preparing` |
 | `Downloading` | `Preparing` | 重新挂载，依靠分片记录续传 |
-| `Paused` | `Paused` | 保持暂停，需用户继续 |
-| `Verifying` | `Verifying` | 直接重新校验，不重新下载 |
+| `Paused` | `Paused` | 用户主动暂停，保持暂停，需用户继续；仍保留在待下载列表 |
+| `Verifying` | `Verifying` | 直接重新校验，不重新下载；元信息缓存缺失则降级 `Preparing` |
 | `RetryWait` | `RetryWait` | `NextRetryAt` 未到继续等待；已到则触发 `RETRY_DELAY_ELAPSED` |
 | `Completed` | `Completed` | 若 `Local != Present`，保持并展示丢失/损坏 |
-| `Failed` / `Cancelled` | 原样 | 等待用户重试/重新下载 |
+| `Failed` | `Preparing` | 异常中断（元信息超时、挂载失败、网络中断、强制退出），自动 `MANUAL_RETRY` 重新入队 |
+| `Cancelled` | `Cancelled` | 用户主动取消，保持原状；仍保留在待下载列表，需用户重新下载 |
 | `Kind=Local` | `Completed` | 启动异步检查文件，缺失则 `FILE_LOST` |
 
 `Verifying` 是可持久化的暂态；重启后重跑校验即可，不引入额外状态。
+
+恢复时优先复用下载目录下的 `.meta/{infoHash}.torrent` 元信息缓存，避免在「未获取到元数据」阶段异常退出后，重启再次等待 DHT / peer 拉取元信息。
+
+数据库是待下载队列的唯一事实源：`Paused` / `Cancelled` 属于明确的用户意图，不自动恢复，但记录始终保留；`Failed` 属于异常中断，自动恢复。任何状态都不会因为启动、异常或内存丢失而被自动移出待下载列表，只有用户手动删除记录才会移除。
 
 ## 8. 数据库迁移与兼容
 
@@ -504,7 +509,7 @@ CREATE INDEX idx_resources_retry ON resources(task_state, next_retry_at);
 | 页面 | 查询条件 | 说明 |
 |---|---|---|
 | 种子资源页 | `kind=Torrent` 且不过滤状态 | 状态用 `(TaskState, LocalState)` 派生 |
-| 下载页进行中 | `task_state IN (Preparing,Queued,Downloading,Paused,RetryWait,Verifying)` | 不再用"内存 map 全量扫描" |
+| 下载页进行中 | `kind=Torrent AND task_state IN (Preparing,Queued,Downloading,Paused,Verifying,RetryWait,Failed,Cancelled)` | 数据库是待下载队列唯一事实源；内存任务用实时快照，其余从数据库补齐，异常中断的任务不会从列表丢失 |
 | 下载页已完成 | `kind=Torrent AND task_state=Completed` | **排除本地视频**（修复现状污染） |
 | 播放列表 | `kind=Torrent AND task_state=Completed AND local_state=Present` 或 `kind=Local AND local_state=Present` | 不再只判断 `local_path` |
 | 播放路由 | `TaskState==Completed && LocalState==Present` → 本地；`Active` 且元信息就绪 → 边下边播；否则 `FILE_LOST`/`PAUSED` 明确报错 | 状态驱动，不再只看下载状态 |

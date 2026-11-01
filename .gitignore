@@ -4,6 +4,9 @@ bin
 data/
 # DHT 爬虫运行期落盘数据（从仓库根目录直接启动时生成）
 resources/crawler/
+# 各平台 ffmpeg 二进制（本地下载，只保留目录占位）
+resources/bin/ffmpeg/*/*
+!resources/bin/ffmpeg/*/.gitkeep
 frontend/dist
 # 本地多模块工作区（含本机绝对/相对路径），不提交
 go.work

@@ -6,6 +6,7 @@ import (
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/i18n"
 	"github.com/bing/bing-play/internal/logger"
+	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/utils/updater"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -36,8 +37,10 @@ type WailsAppParams struct {
 	Config       *config.Config
 	Services     []application.Service `group:"wails-services"`
 	Assets       embed.FS
+	AppIcon      AppIcon
 	VideoService *service.VideoService
 	I18n         *i18n.I18nService
+	HTTPServer   *server.Server
 }
 
 func NewWailsApp(p WailsAppParams) *application.App {
@@ -46,12 +49,16 @@ func NewWailsApp(p WailsAppParams) *application.App {
 	services := p.Services
 	videoService := p.VideoService
 	i18nService := p.I18n
+	httpServer := p.HTTPServer
 
 	app := application.New(application.Options{
 		Name:        cfg.AppName,
 		Description: "A demo of using raw HTML & CSS",
 
 		Services: services,
+
+		// 窗口与任务栏图标：使用品牌图标，避免回退到 Wails 默认图标。
+		Icon: []byte(p.AppIcon),
 
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -70,6 +77,14 @@ func NewWailsApp(p WailsAppParams) *application.App {
 
 		OnShutdown: func() {
 			logger.App.Info("应用准备退出2")
+			// 关闭顺序：HTTP 先停，下载引擎等资源后停。
+			// OnShutdown 早于 Wails 的 ServiceShutdown 与 Fx 的 OnStop，
+			// 这里先断开监听和活动连接，避免退出过程中仍有请求访问已释放的资源。
+			if httpServer != nil {
+				if err := httpServer.Close(); err != nil {
+					logger.Error.Error("关闭 http server 失败", "error", err)
+				}
+			}
 		},
 
 		PostShutdown: func() {

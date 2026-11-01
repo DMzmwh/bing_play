@@ -42,7 +42,11 @@ type Service struct {
 	resourceDAO *dao.ResourceDAO
 	settingDAO  *dao.AppSettingDAO
 	cancel      context.CancelFunc
-	mu          sync.Mutex
+	// client / conn 保存爬虫持有的 DHT 客户端与 UDP 连接，
+	// 停止时必须由 Service 自己同步关闭，保证端口立即释放。
+	client dht.Client
+	conn   net.PacketConn
+	mu     sync.Mutex
 }
 
 // NewService 注册到 Fx 生命周期，应用启动即自动拉起爬虫。
@@ -95,7 +99,7 @@ func (s *Service) startCrawler() {
 
 	store := NewResourceStorage(s.resourceDAO)
 
-	client, err := newDHTClient(port)
+	client, conn, err := newDHTClient(port)
 	if err != nil {
 		logger.Error.Error("DHT 爬虫启动失败：DHT 客户端创建失败",
 			slog.String("err", err.Error()),
@@ -106,7 +110,8 @@ func (s *Service) startCrawler() {
 
 	m, err := metrics.InitMetrics()
 	if err != nil {
-		client.Close()
+		// 启动失败也要立刻释放已占用的 UDP 端口
+		closeCrawlerClient(client, conn)
 		logger.Error.Error("DHT 爬虫启动失败：metrics 初始化失败", slog.String("err", err.Error()))
 		return
 	}
@@ -126,16 +131,13 @@ func (s *Service) startCrawler() {
 	c.Start(ctx)
 
 	s.cancel = cancel
+	s.client = client
+	s.conn = conn
 
 	logger.App.Info("DHT 爬虫已启动",
 		slog.String("storage", "resources 表"),
 		slog.Int("udp_port", port),
 	)
-
-	go func() {
-		<-ctx.Done()
-		client.Close()
-	}()
 }
 
 // runtimeOptions 优先读取 app_settings 中的爬虫分组配置，读取失败时使用启动配置。
@@ -176,15 +178,41 @@ func (s *Service) stop() {
 }
 
 func (s *Service) stopCrawler() {
-	if s.cancel == nil {
-		return
+	started := s.cancel != nil || s.client != nil || s.conn != nil
+	if s.cancel != nil {
+		s.cancel()
+		s.cancel = nil
 	}
-	s.cancel()
-	s.cancel = nil
-	logger.App.Info("DHT 爬虫已停止")
+	// 无论是否处于运行状态都要释放底层连接：
+	// ReloadCrawler 在启动失败后也需要把端口还给系统。
+	s.closeClient()
+	if started {
+		logger.App.Info("DHT 爬虫已停止")
+	}
 }
 
-func newDHTClient(port int) (dht.Client, error) {
+// closeClient 同步关闭 DHT 客户端与 UDP 连接。
+//
+// dht.Server.Close 内部对 socket 是异步关闭（go s.socket.Close()），
+// 仅调用 client.Close() 无法保证端口马上释放，因此这里再直接关闭 conn，
+// 避免 ReloadCrawler 立即重启时因端口占用而绑定失败。
+func (s *Service) closeClient() {
+	closeCrawlerClient(s.client, s.conn)
+	s.client = nil
+	s.conn = nil
+}
+
+// closeCrawlerClient 关闭 DHT 客户端与 UDP 连接，重复调用安全。
+func closeCrawlerClient(client dht.Client, conn net.PacketConn) {
+	if client != nil {
+		client.Close()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+func newDHTClient(port int) (dht.Client, net.PacketConn, error) {
 	cfg := anacrolix.NewDefaultServerConfig()
 
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{
@@ -192,16 +220,16 @@ func newDHTClient(port int) (dht.Client, error) {
 		Port: port,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("监听 UDP %d 失败: %w", port, err)
+		return nil, nil, fmt.Errorf("监听 UDP %d 失败: %w", port, err)
 	}
 
 	cfg.Conn = conn
 
 	client, err := dht.NewAnacrolixClient(cfg)
 	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("创建 DHT 客户端失败: %w", err)
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("创建 DHT 客户端失败: %w", err)
 	}
 
-	return client, nil
+	return client, conn, nil
 }

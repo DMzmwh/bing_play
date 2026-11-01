@@ -43,7 +43,11 @@ func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
 
 	savedLang, _ := settingDAO.Get(SettingKeyLanguage)
 	if savedLang == "" {
-		savedLang = defaultLang
+		// 首次启动跟随系统界面语言，识别失败时回退默认语言
+		savedLang = detectSystemLang()
+		if savedLang == "" {
+			savedLang = defaultLang
+		}
 	}
 	//bundle.RegisterUnmarshalFunc(
 	//	"toml",

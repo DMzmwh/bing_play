@@ -2,7 +2,11 @@
     <div class="play">
         <!-- 左侧播放列表 -->
         <div class="left-panel" :style="{ width: `${sidebarWidth}px` }">
-            <div class="title">播放列表 [{{ playlist.length }}]</div>
+            <!-- 配套图标：与导航主图标同一字形，去掉底板，18px 与标题文字对齐 -->
+            <div class="title">
+                <BrandIcon class="playlist-logo" variant="mark" :size="18" />
+                <span class="title-text">播放列表 [{{ playlist.length }}]</span>
+            </div>
 
             <!-- <div class="search">
                 <n-input size="small" placeholder="请输入搜索关键词" />
@@ -70,7 +74,7 @@
                 @error="onPlayerError"
             />
             <!-- 空状态：还没有播放地址时展示拖拽引导 -->
-            <div v-if="!videoUrl && !dragOver" class="empty-state">
+            <div v-if="!videoUrl && !dragOver && !preparing" class="empty-state">
                 <svg class="empty-icon" viewBox="0 0 64 64" aria-hidden="true">
                     <rect x="7" y="13" width="50" height="38" rx="4" />
                     <circle cx="32" cy="32" r="9.5" />
@@ -82,6 +86,21 @@
                 <div class="empty-hint">{{ t('video.empty_hint') }}</div>
             </div>
             <div v-if="dragOver" class="drop-tip">{{ t('video.drop_tip') }}</div>
+            <!-- 播放前探测 / 转码提示，文案与进度都来自后端 -->
+            <div v-if="preparing && !videoUrl" class="prepare-tip">
+                <div class="prepare-text">
+                    {{ prepareMessage || t('video.transcode.preparing') }}
+                </div>
+                <n-progress
+                    v-if="prepareProgress > 0"
+                    class="prepare-progress"
+                    type="line"
+                    :percentage="prepareProgressValue"
+                    :height="4"
+                    :show-indicator="false"
+                />
+                <div v-if="prepareProgress > 0" class="prepare-percent">{{ prepareProgressValue }}%</div>
+            </div>
             <div v-if="errorMsg" class="error-tip">{{ errorMsg }}</div>
             <!-- 底部控制条 -->
             <!-- <PlayerPanel /> -->
@@ -94,6 +113,7 @@ import { Window, Events } from '@wailsio/runtime'
 import { CaretDown, CaretForward } from '@vicons/ionicons5'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
+import BrandIcon from '@/components/BrandIcon.vue'
 import { i18nState, t } from '@/i18n'
 import {
     SettingKeys,
@@ -201,11 +221,45 @@ function videoUrlById(id: number): string {
     return `${API_BASE}/video/${id}`
 }
 
-const videoUrl = computed(() =>
-    currentVideoId.value ? videoUrlById(currentVideoId.value) : ''
-)
+/** 后端 /video/prepare 与 /video/transcode/{jobId} 的返回结构 */
+interface PrepareResponse {
+    id?: number
+    url?: string
+    action?: string
+    jobId?: string
+    phase?: string
+    progress?: number
+    message?: string
+}
+
+/** 转换进度轮询间隔 */
+const TRANSCODE_POLL_INTERVAL = 800
+
+/** 真正交给播放器的地址：探测 / 转换完成前为空，避免先播出只有声音的视频 */
+const playbackUrl = ref('')
+/** 是否正在探测或转换视频格式 */
+const preparing = ref(false)
+/** 转换进度百分比 */
+const prepareProgress = ref(0)
+/** 后端按当前语言生成的提示文案 */
+const prepareMessage = ref('')
+/** 切换视频后，旧请求返回的数据不再生效 */
+let prepareToken = 0
+
+const videoUrl = computed(() => playbackUrl.value)
+const prepareProgressValue = computed(() => Math.round(prepareProgress.value))
 const dragOver = ref(false)
 const errorMsg = ref('')
+
+function sleep(ms: number) {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+/** 进度值做边界保护，后端异常数据不影响进度条 */
+function clampProgress(value?: number) {
+    if (!value || value < 0) return 0
+    return value > 100 ? 100 : value
+}
 
 const message = useMessage()
 
@@ -306,6 +360,97 @@ function playVideo(video: PlaylistItem) {
     selectVideo(video)
 }
 
+// 切换视频时重新准备：清空旧地址，并让上一次的请求与轮询失效
+watch(currentVideoId, (id) => {
+    prepareToken += 1
+    const token = prepareToken
+
+    playbackUrl.value = ''
+    prepareProgress.value = 0
+    prepareMessage.value = ''
+
+    if (id === null) {
+        preparing.value = false
+        return
+    }
+    preparing.value = true
+    void prepareVideo(id, token)
+})
+
+/** 播放前请求后端探测格式，需要转码时等待转换完成再播放 */
+async function prepareVideo(id: number, token: number) {
+    try {
+        const response = await fetch(`${API_BASE}/video/prepare/${id}`)
+        if (token !== prepareToken) return
+        if (!response.ok) throw new Error(await response.text())
+
+        const data = (await response.json()) as PrepareResponse
+        if (token !== prepareToken) return
+
+        applyPrepareResult(data, id)
+        if (data.action === 'convert' && data.jobId) {
+            await pollTranscode(data.jobId, id, token)
+        }
+    } catch (error) {
+        if (token !== prepareToken) return
+        // 准备接口异常时不阻断播放，直接使用原文件地址
+        playbackUrl.value = videoUrlById(id)
+        errorMsg.value = error instanceof Error ? error.message : ''
+    } finally {
+        if (token === prepareToken) preparing.value = false
+    }
+}
+
+/** 应用准备结果：只有转换成功才切到缓存地址，其余场景回退原文件 */
+function applyPrepareResult(data: PrepareResponse, id: number) {
+    prepareProgress.value = clampProgress(data.progress)
+    if (data.message) prepareMessage.value = data.message
+
+    if (data.action === 'play_converted' && data.url) {
+        playbackUrl.value = data.url
+        prepareMessage.value = ''
+        return
+    }
+    if (data.action === 'play_direct') {
+        playbackUrl.value = videoUrlById(id)
+        prepareMessage.value = ''
+        return
+    }
+    // convert 由轮询继续等待；fallback / defer 直接播放原文件并保留后端提示
+    if (data.action !== 'convert') {
+        playbackUrl.value = videoUrlById(id)
+    }
+}
+
+/** 轮询转换进度，任务结束后回到播放流程 */
+async function pollTranscode(jobId: string, id: number, token: number) {
+    while (token === prepareToken) {
+        await sleep(TRANSCODE_POLL_INTERVAL)
+        if (token !== prepareToken) return
+
+        try {
+            const response = await fetch(`${API_BASE}/video/transcode/${jobId}`)
+            if (!response.ok) throw new Error(await response.text())
+
+            const data = (await response.json()) as PrepareResponse
+            if (token !== prepareToken) return
+
+            prepareProgress.value = clampProgress(data.progress)
+            if (data.message) prepareMessage.value = data.message
+            if (data.phase !== 'done' && data.phase !== 'canceled') continue
+
+            applyPrepareResult(data, id)
+            return
+        } catch (error) {
+            if (token !== prepareToken) return
+            // 进度查询失败时不再等待，回退原文件播放
+            playbackUrl.value = videoUrlById(id)
+            errorMsg.value = error instanceof Error ? error.message : ''
+            return
+        }
+    }
+}
+
 /** 播放失败时切到下一个；已是最后一个则显示错误提示 */
 function onPlayerError(_error: Error, failedUrl?: string) {
     const failedId = currentVideoId.value
@@ -314,7 +459,7 @@ function onPlayerError(_error: Error, failedUrl?: string) {
         return
     }
     // 已切换到别的视频后旧视频源才抛出的错误，直接忽略
-    if (failedUrl && failedUrl !== videoUrlById(failedId)) return
+    if (failedUrl && failedUrl !== playbackUrl.value) return
 
     if (canPlayNext.value) {
         selectVideo(playlist.value[currentIndex.value + 1])
@@ -431,9 +576,16 @@ async function syncWindowMaximise(state: boolean) {
 }
 
 .title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: var(--app-text);
     margin-bottom: 10px;
     flex-shrink: 0; // 固定不压缩
+}
+
+.title-text {
+    min-width: 0;
 }
 
 .search {
@@ -521,6 +673,34 @@ async function syncWindowMaximise(state: boolean) {
     font-size: 13px;
     pointer-events: none;
     z-index: 10;
+}
+
+/* 播放前探测 / 转码提示 */
+.prepare-tip {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    max-width: 70%;
+    padding: 12px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--app-text-muted);
+    background: var(--app-surface);
+    z-index: 10;
+}
+
+.prepare-progress {
+    width: 220px;
+}
+
+.prepare-percent {
+    font-size: 12px;
+    opacity: 0.8;
 }
 
 /* 空状态：无播放地址时的拖拽引导 */

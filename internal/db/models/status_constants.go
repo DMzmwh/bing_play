@@ -88,6 +88,35 @@ func (s TaskState) Active() bool {
 	return s.Valid() && activeMask&(1<<uint(s)) != 0
 }
 
+// pendingMask 待下载列表状态位图：用户触发过下载、且尚未完成的任务。
+//
+// Cancelled 也包含在内：用户取消只改变任务状态，任务记录仍保留在列表中，
+// 只有用户手动删除记录才会从待下载列表移除。
+const pendingMask uint32 = 1<<uint(TaskPreparing) | 1<<uint(TaskQueued) |
+	1<<uint(TaskDownloading) | 1<<uint(TaskPaused) | 1<<uint(TaskVerifying) |
+	1<<uint(TaskRetryWait) | 1<<uint(TaskFailed) | 1<<uint(TaskCancelled)
+
+// Pending 判断任务是否应保留在下载页「待下载」列表，O(1)。
+//
+// 只要用户触发过下载且任务未完成，无论经历元信息超时、网络中断、
+// 强制退出还是系统重启，该状态集合内的任务都必须继续展示。
+func (s TaskState) Pending() bool {
+	return s.Valid() && pendingMask&(1<<uint(s)) != 0
+}
+
+// recoverMask 应用启动时需要自动恢复下载的状态位图。
+//
+// Paused（用户主动暂停）与 Cancelled（用户主动取消）属于明确的用户意图，
+// 不自动恢复；其余待下载状态都视为异常中断，启动后自动重新入队。
+const recoverMask uint32 = 1<<uint(TaskPreparing) | 1<<uint(TaskQueued) |
+	1<<uint(TaskDownloading) | 1<<uint(TaskVerifying) | 1<<uint(TaskRetryWait) |
+	1<<uint(TaskFailed)
+
+// Recoverable 判断任务是否需要在应用启动时自动恢复下载流程，O(1)。
+func (s TaskState) Recoverable() bool {
+	return s.Valid() && recoverMask&(1<<uint(s)) != 0
+}
+
 // =========================================================
 // 本地文件可用性（LocalState）
 // =========================================================
@@ -665,7 +694,8 @@ func (r *Resource) ApplyEvent(e Event, p EventPayload) (Result, error) {
 		r.ErrorCode = ""
 		r.NextRetryAt = nil
 	case EvMetaReady:
-		r.Attempt = 0
+		// 元数据就绪只说明这一步成功，不代表任务已恢复正常；
+		// 连续失败次数继续累计，否则每次重试都会被清零，永远到不了上限。
 		r.ErrorCode = ""
 		r.NextRetryAt = nil
 	case EvMetaTimeout, EvAttachFail, EvStalled:

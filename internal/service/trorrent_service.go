@@ -143,7 +143,7 @@ func (s *TorrentService) List() []*vo.TorrentJobVO {
 	return s.manager.ListJobs()
 }
 
-// ListActive 获取进行中的下载任务，仅读取内存，不查询数据库。
+// ListActive 获取「待下载」列表：内存运行时任务用实时快照，其余未完成任务从数据库补齐。
 func (s *TorrentService) ListActive() []*vo.TorrentJobVO {
 	return s.manager.ListActiveJobs()
 }
@@ -155,6 +155,11 @@ func (s *TorrentService) ListCompleted() ([]*vo.TorrentJobVO, error) {
 		return nil, s.translateError(err)
 	}
 	return rows, nil
+}
+
+// OpenDownloadDir 打开已完成任务的下载目录。
+func (s *TorrentService) OpenDownloadDir(infoHash string) error {
+	return s.translateError(s.manager.OpenDownloadDir(infoHash))
 }
 
 // GetOptions 返回下载模块当前运行参数，用于下载页展示并发与重试策略。

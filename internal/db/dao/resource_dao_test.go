@@ -394,3 +394,76 @@ func TestListDownloadTasks(t *testing.T) {
 		t.Fatalf("已完成任务结果 = %v", completed)
 	}
 }
+
+// TestListPendingTasks 待下载列表以数据库为事实源，必须包含所有未完成状态，
+// 排除仅爬虫发现的记录、已完成任务与本地视频。
+func TestListPendingTasks(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	mk := func(hash string, state models.TaskState) *models.Resource {
+		name := hash
+		return &models.Resource{
+			InfoHash:     hash,
+			ResourceName: &name,
+			Kind:         models.KindTorrent,
+			TaskState:    state,
+			LocalState:   models.LocalNone,
+			CreateTime:   &now,
+			UpdateTime:   &now,
+		}
+	}
+
+	pendingStates := []models.TaskState{
+		models.TaskPreparing, models.TaskQueued, models.TaskDownloading,
+		models.TaskPaused, models.TaskVerifying, models.TaskRetryWait,
+		models.TaskFailed, models.TaskCancelled,
+	}
+	for i, state := range pendingStates {
+		if err := d.Save(mk("hash-pending-"+string(rune('a'+i)), state)); err != nil {
+			t.Fatalf("写入待下载任务 %v 失败: %v", state, err)
+		}
+	}
+
+	if err := d.Save(mk("hash-raw", models.TaskDiscovered)); err != nil {
+		t.Fatalf("写入爬虫记录失败: %v", err)
+	}
+	if err := d.Save(mk("hash-done", models.TaskCompleted)); err != nil {
+		t.Fatalf("写入已完成任务失败: %v", err)
+	}
+	localName := "本地视频"
+	if err := d.SaveLocalResource(&models.Resource{
+		ResourceName: &localName,
+		Kind:         models.KindLocal,
+		TaskState:    models.TaskFailed,
+		LocalState:   models.LocalMissing,
+		CreateTime:   &now,
+		UpdateTime:   &now,
+	}); err != nil {
+		t.Fatalf("写入本地视频失败: %v", err)
+	}
+
+	rows, err := d.ListPendingTasks()
+	if err != nil {
+		t.Fatalf("查询待下载任务失败: %v", err)
+	}
+	if len(rows) != len(pendingStates) {
+		t.Fatalf("待下载任务数 = %d, want %d (%v)", len(rows), len(pendingStates), rows)
+	}
+
+	got := make(map[string]models.TaskState, len(rows))
+	for _, row := range rows {
+		got[row.InfoHash] = row.TaskState
+	}
+	for i, state := range pendingStates {
+		hash := "hash-pending-" + string(rune('a'+i))
+		if got[hash] != state {
+			t.Fatalf("状态 %v 的任务未保留在待下载列表: %v", state, got)
+		}
+	}
+	for _, hash := range []string{"hash-raw", "hash-done"} {
+		if _, ok := got[hash]; ok {
+			t.Fatalf("任务 %q 不应出现在待下载列表", hash)
+		}
+	}
+}

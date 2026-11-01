@@ -53,6 +53,8 @@ const (
 	ErrKeyRepairNotNeeded = "download.error.repair_not_needed"
 	// ErrKeyDeleteNotAllowed 当前状态不允许删除本地文件。
 	ErrKeyDeleteNotAllowed = "download.error.delete_not_allowed"
+	// ErrKeyOpenDirFailed 下载目录不存在或无法打开。
+	ErrKeyOpenDirFailed = "download.error.open_dir_failed"
 )
 
 // DownloadConfig 下载模块运行参数，集中定义便于后续扩展为设置项。

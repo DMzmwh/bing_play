@@ -188,3 +188,49 @@ func TestDisplayMatrixCoversValidPairs(t *testing.T) {
 		}
 	}
 }
+
+// TestPendingKeepsUnfinishedTasks 待下载列表必须保留所有用户触发过、
+// 且尚未完成的任务状态，只有已完成与仅爬虫发现的记录才被排除。
+func TestPendingKeepsUnfinishedTasks(t *testing.T) {
+	pending := []TaskState{
+		TaskPreparing, TaskQueued, TaskDownloading, TaskPaused,
+		TaskVerifying, TaskRetryWait, TaskFailed, TaskCancelled,
+	}
+	for _, state := range pending {
+		if !state.Pending() {
+			t.Fatalf("状态 %v 应保留在待下载列表", state)
+		}
+	}
+
+	for _, state := range []TaskState{TaskDiscovered, TaskCompleted} {
+		if state.Pending() {
+			t.Fatalf("状态 %v 不应出现在待下载列表", state)
+		}
+	}
+	if TaskState(TaskStateCount).Pending() {
+		t.Fatal("越界状态不应出现在待下载列表")
+	}
+}
+
+// TestRecoverableExcludesUserIntent 自动恢复集合只覆盖异常中断，
+// 用户主动暂停 / 取消的任务保留在列表但不自动继续下载。
+func TestRecoverableExcludesUserIntent(t *testing.T) {
+	recoverable := []TaskState{
+		TaskPreparing, TaskQueued, TaskDownloading,
+		TaskVerifying, TaskRetryWait, TaskFailed,
+	}
+	for _, state := range recoverable {
+		if !state.Recoverable() {
+			t.Fatalf("状态 %v 应在启动时自动恢复", state)
+		}
+	}
+
+	for _, state := range []TaskState{TaskPaused, TaskCancelled, TaskCompleted, TaskDiscovered} {
+		if state.Recoverable() {
+			t.Fatalf("状态 %v 不应自动恢复", state)
+		}
+	}
+	if TaskState(TaskStateCount).Recoverable() {
+		t.Fatal("越界状态不应自动恢复")
+	}
+}

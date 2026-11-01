@@ -7,10 +7,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bing/bing-play/internal/config"
@@ -28,6 +31,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"go.uber.org/fx"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 )
 
@@ -51,6 +55,10 @@ type TorrentManager struct {
 	// 若每次任务都重新打开，后续任务会加入失败并被误判为网络异常。
 	piecesMu sync.Mutex
 	pieces   map[string]storage.PieceCompletion
+
+	// closed 标记管理器已进入关闭流程。
+	// 关闭后不再调度新任务，Shutdown 也可以被重复调用（Wails 与 Fx 都会触发）。
+	closed atomic.Bool
 }
 
 // 命名规范：{构造名}Params
@@ -115,6 +123,20 @@ func NewManager(lc fx.Lifecycle, cn WailsAppParams) (*TorrentManager, error) {
 	c.Seed = false
 	// 10. 可选：如果网络在国内，建议关掉一些奇怪限制
 	c.DisableAcceptRateLimiting = true
+
+	// 11. 放宽内部吞吐限制。默认值偏保守，高带宽 / 热门资源时会先撞到这些上限，
+	// 表现为 peer 很多但速度上不去，或连上后长时间等在哈希校验。
+	// 全局半开连接数上限（默认 100），多个任务并发时不够用
+	c.TotalHalfOpenConns = 400
+	// 每个种子保留的候选 peer 地址上限（默认 500），热门资源可多留候选
+	c.TorrentPeersHighWater = 1500
+	// 每秒新建 peer 连接数（默认 10/s），peer 多时建连速度会成为瓶颈
+	c.DialRateLimiter = rate.NewLimiter(50, 50)
+	// 每个种子的哈希校验协程数（默认 2），CPU 富余时可减少“下载等校验”
+	c.PieceHashersPerTorrent = 4
+	// 全客户端未校验数据上限（默认 64MiB），提高后高带宽下不易被校验阻塞
+	c.MaxUnverifiedBytes = 256 << 20
+
 	fmt.Println("goos:", c.DataDir)
 	c.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
 		return func() ([]dht.Addr, error) {
@@ -146,10 +168,15 @@ func NewManager(lc fx.Lifecycle, cn WailsAppParams) (*TorrentManager, error) {
 	}
 
 	// 启动时按状态机恢复规则恢复未完成任务。
+	// 退出时由 Fx 兜底关闭下载引擎；Wails 的 ServiceShutdown 会先调用一次，
+	// Shutdown 内部做了幂等处理，不会重复释放。
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
 			go manager.RecoverPendingJobs()
 			return nil
+		},
+		OnStop: func(context.Context) error {
+			return manager.Shutdown()
 		},
 	})
 
@@ -175,7 +202,15 @@ func (m *TorrentManager) currentDownloadDir() string {
 	return m.downloadDir
 }
 
+// Shutdown 关闭下载引擎并释放所有任务占用的资源。
+//
+// Wails 的 ServiceShutdown 与 Fx 的 OnStop 都会调用这里，
+// 通过 closed 标记保证真正的释放流程只执行一次。
 func (m *TorrentManager) Shutdown() error {
+	if !m.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+
 	m.mu.RLock()
 	jobs := make([]*TorrentJob, 0, len(m.jobsMap))
 	for _, job := range m.jobsMap {
@@ -280,13 +315,18 @@ func sortDownloadVOs(result []*vo.TorrentJobVO) {
 	})
 }
 
-// ListActiveJobs 仅从内存读取未完成任务快照，不查询数据库。
-// 供下载页高频轮询使用，避免数据库压力。
+// ListActiveJobs 返回下载页「待下载」列表快照。
+//
+// 数据库是待下载队列的唯一事实源：内存中有运行时数据的任务使用实时快照，
+// 其余未完成任务（重启后自动恢复中的任务、等待重试的任务、暂停 / 失败 / 取消的任务）
+// 从数据库补齐，保证用户触发过的任务只要未完成就不会从列表中消失。
 func (m *TorrentManager) ListActiveJobs() []*vo.TorrentJobVO {
 	m.mu.RLock()
 	jobs := make([]*TorrentJob, 0, len(m.jobsMap))
-	for _, job := range m.jobsMap {
+	inMemory := make(map[string]struct{}, len(m.jobsMap))
+	for hash, job := range m.jobsMap {
 		jobs = append(jobs, job)
+		inMemory[hash] = struct{}{}
 	}
 	m.mu.RUnlock()
 
@@ -298,6 +338,18 @@ func (m *TorrentManager) ListActiveJobs() []*vo.TorrentJobVO {
 			continue
 		}
 		result = append(result, payload)
+	}
+
+	pendingRows, err := m.ResourceDao.ListPendingTasks()
+	if err != nil {
+		logger.Torrent.Error("查询待下载任务失败", slog.Any("err", err))
+	} else {
+		for i := range pendingRows {
+			if _, ok := inMemory[pendingRows[i].InfoHash]; ok {
+				continue
+			}
+			result = append(result, voFromResource(&pendingRows[i]))
+		}
 	}
 
 	sortDownloadVOs(result)
@@ -614,19 +666,76 @@ func (m *TorrentManager) applyResourceEvent(infoHash string, e models.Event, p m
 
 	now := p.Now
 	resource.UpdateTime = &now
-	if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
+	if err := m.persistState(resource, fromVersion); err != nil {
 		return err
 	}
 	emitDownloadEvent(EventDownloadStateChanged, voFromResource(resource))
 	return nil
 }
 
+// statePersistAttempts 状态写入的 CAS 冲突重试次数。
+const statePersistAttempts = 3
+
+// persistState 以 CAS 方式写回任务的完整状态，冲突时基于数据库最新版本重试。
+//
+// 状态迁移（入队、恢复、失败、取消）必须落库成功，避免异常场景下内存与数据库
+// 版本不一致导致任务被误判为未触发下载而从待下载列表丢失。
+func (m *TorrentManager) persistState(resource *models.Resource, fromVersion uint64) error {
+	if resource == nil || resource.ID == 0 {
+		return nil
+	}
+
+	version := fromVersion
+	for attempt := 0; attempt < statePersistAttempts; attempt++ {
+		ok, err := m.ResourceDao.UpdateState(resource, version)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+
+		latest, err := m.ResourceDao.GetByInfoHash(resource.InfoHash)
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return errors.New(ErrKeyTaskNotFound)
+		}
+		// 保留本次要写入的目标状态，仅同步到数据库最新版本后重试。
+		version = latest.StateVersion
+		resource.StateVersion = version + 1
+	}
+
+	logger.Torrent.Warn("下载任务状态写入版本冲突，已放弃本次重试",
+		slog.String("info_hash", resource.InfoHash),
+		slog.Uint64("version", resource.StateVersion),
+	)
+	return fmt.Errorf("%s: %s", ErrKeyInvalidTransition, resource.InfoHash)
+}
+
 // persistSnapshot 以 CAS 方式写入资源快照，返回是否写入成功。
-// 失败通常意味着存在更新的写入，本次陈旧快照被丢弃。
-func (m *TorrentManager) persistSnapshot(resource *models.Resource, fromVersion uint64) bool {
+//
+// allowRetry 为 true 时代表状态迁移，冲突时基于数据库最新版本重试，
+// 保证任何异常场景下状态变更都能原子落库；为 false 时代表周期进度快照，
+// 冲突说明存在更新的写入，直接丢弃陈旧快照。
+func (m *TorrentManager) persistSnapshot(resource *models.Resource, fromVersion uint64, allowRetry bool) bool {
 	if resource == nil {
 		return false
 	}
+
+	if allowRetry {
+		if err := m.persistState(resource, fromVersion); err != nil {
+			logger.Torrent.Error("保存下载任务状态失败",
+				slog.String("info_hash", resource.InfoHash),
+				slog.Any("err", err),
+			)
+			m.syncJobVersion(resource.InfoHash)
+			return false
+		}
+		return true
+	}
+
 	ok, err := m.ResourceDao.UpdateState(resource, fromVersion)
 	if err != nil {
 		logger.Torrent.Error("保存下载任务失败", slog.String("info_hash", resource.InfoHash), slog.Any("err", err))
@@ -667,8 +776,16 @@ func (m *TorrentManager) emitState(job *TorrentJob) {
 // schedule 持续领取排队任务，直到信号量用尽或队列为空。
 // 队列按优先级倒序、创建时间正序选取，保证高优先级任务先下载。
 func (m *TorrentManager) schedule() {
+	// 关闭后不再领取排队任务，避免关停过程中重新挂载种子。
+	if m.closed.Load() {
+		return
+	}
 	for {
 		if !m.sem.TryAcquire(1) {
+			return
+		}
+		if m.closed.Load() {
+			m.sem.Release(1)
 			return
 		}
 		job := m.claimNextQueued()
@@ -903,17 +1020,29 @@ func (m *TorrentManager) cacheMetadata(baseDir, infoHash string, tt *torrent.Tor
 	}
 }
 
-// recoverTaskStates 启动时需要恢复的任务状态。
+// recoverTaskStates 应用启动时需要自动恢复的任务状态。
+//
+// Paused（用户暂停）与 Cancelled（用户取消）属于明确的用户意图，不自动恢复，
+// 但仍通过数据库查询保留在「待下载」列表。Failed 属于异常中断（元信息超时、
+// 挂载失败、网络中断、应用强制退出等），需要自动重新入队。
 var recoverTaskStates = []models.TaskState{
 	models.TaskPreparing,
 	models.TaskQueued,
 	models.TaskDownloading,
 	models.TaskVerifying,
 	models.TaskRetryWait,
+	models.TaskFailed,
 }
 
-// RecoverPendingJobs 应用启动后按状态机恢复规则恢复未完成的下载任务。
+// RecoverPendingJobs 应用启动后扫描待下载队列，自动恢复所有异常中断的任务。
+//
+// 数据来源为数据库中的完整任务状态，因此元信息获取失败、网络中断、
+// 应用强制退出、系统重启等场景都能在重启后自动继续下载，无需用户手动触发。
 func (m *TorrentManager) RecoverPendingJobs() {
+	// 启动恢复是异步执行的，应用可能已经进入退出流程。
+	if m.closed.Load() {
+		return
+	}
 	rows, err := m.ResourceDao.ListByTaskStates(recoverTaskStates)
 	if err != nil {
 		logger.Torrent.Error("恢复未完成下载任务失败", slog.Any("err", err))
@@ -929,10 +1058,32 @@ func (m *TorrentManager) RecoverPendingJobs() {
 	m.schedule()
 }
 
+// withMetadataCache 优先复用下载目录中缓存的种子元信息。
+//
+// 元信息只在首次就绪时写入缓存；任务在拉取元信息阶段异常退出后重启，
+// 直接使用缓存即可跳过 DHT / peer 拉取，避免再次等待元信息而卡在准备阶段。
+func (m *TorrentManager) withMetadataCache(baseDir, infoHash string, spec *torrent.TorrentSpec) *torrent.TorrentSpec {
+	if spec == nil || len(spec.InfoBytes) > 0 {
+		return spec
+	}
+	if baseDir == "" {
+		baseDir = m.currentDownloadDir()
+	}
+	cached := readMetadataCache(baseDir, infoHash)
+	if cached == nil {
+		return spec
+	}
+	cached.PeerAddrs = append(cached.PeerAddrs, spec.PeerAddrs...)
+	cached.Sources = append(cached.Sources, spec.Sources...)
+	cached.Webseeds = append(cached.Webseeds, spec.Webseeds...)
+	return cached
+}
+
 // recoverResource 按 §7 恢复规则恢复单个任务。
 //
 // Downloading 中断后回到 Preparing 重新挂载；Verifying 重新执行落盘校验；
-// RetryWait 未到重试时间则等待；Paused 保持暂停，不进入内存。
+// RetryWait 未到重试时间则等待；Failed 属于异常中断，自动重新入队；
+// Paused / Cancelled 属于用户意图，不自动恢复，但保留在待下载列表。
 func (m *TorrentManager) recoverResource(resource *models.Resource) {
 	if resource == nil || resource.Kind != models.KindTorrent {
 		return
@@ -940,11 +1091,36 @@ func (m *TorrentManager) recoverResource(resource *models.Resource) {
 	if resource.InfoHash == "" && resource.SourceURL == nil && resource.TorrentPath == nil {
 		return
 	}
+	// 内存中已有同一任务时不重复挂载，避免同一 InfoHash 被创建多个句柄。
+	if _, err := m.GetJob(resource.InfoHash); err == nil {
+		return
+	}
 
 	now := time.Now()
 	switch resource.TaskState {
 	case models.TaskDownloading:
 		m.rewriteState(resource, models.TaskPreparing)
+	case models.TaskFailed:
+		// 失败可能来自元信息超时、挂载失败、网络中断或应用强制退出，
+		// 均不属于用户取消；启动时自动重新入队并重置尝试次数。
+		fromVersion := resource.StateVersion
+		if _, err := resource.ApplyEvent(models.EvManualRetry, models.EventPayload{
+			Now:             now,
+			SourceAvailable: sourceAvailable(resource),
+		}); err != nil {
+			logger.Torrent.Warn("自动恢复失败任务被拒绝",
+				slog.String("info_hash", resource.InfoHash),
+				slog.Any("err", err),
+			)
+			return
+		}
+		resource.UpdateTime = &now
+		if err := m.persistState(resource, fromVersion); err != nil {
+			logger.Torrent.Warn("自动恢复失败任务状态落库失败",
+				slog.String("info_hash", resource.InfoHash),
+				slog.Any("err", err),
+			)
+		}
 	case models.TaskVerifying:
 		// 保持 Verifying，挂载后重新校验
 	case models.TaskRetryWait:
@@ -961,19 +1137,33 @@ func (m *TorrentManager) recoverResource(resource *models.Resource) {
 
 	spec, magnet, torrentPath, err := m.specFromResource(resource)
 	if err != nil {
+		// 来源不可解析时先退回准备阶段，才能按状态机迁移到 Failed 并保留错误信息。
+		if resource.TaskState != models.TaskPreparing {
+			m.rewriteState(resource, models.TaskPreparing)
+		}
 		m.failResource(resource, ErrKeyNoSource)
 		return
 	}
+	// 元信息缓存能直接恢复任务，避免重启后再次等待 DHT / peer 拉取。
+	spec = m.withMetadataCache(resource.LocalPath, resource.InfoHash, spec)
+
+	// Queued / Verifying 依赖元信息；缓存缺失时退回准备阶段重新拉取。
+	if resource.TaskState == models.TaskQueued || resource.TaskState == models.TaskVerifying {
+		if len(spec.InfoBytes) == 0 {
+			m.rewriteState(resource, models.TaskPreparing)
+		}
+	}
 
 	job := m.newJob(resource, magnet, torrentPath)
+	// 先登记到内存任务表再挂载：挂载失败进入重试等待后，重试流程依赖调度器
+	// 能从 jobsMap 中取到该任务，否则会在 Queued 状态永久滞留。
+	m.mu.Lock()
+	m.jobsMap[resource.InfoHash] = job
+	m.mu.Unlock()
 	if err := m.attachTorrent(job, spec); err != nil {
 		m.markJobAttachFailed(job, classifyTorrentError(err))
 		return
 	}
-
-	m.mu.Lock()
-	m.jobsMap[resource.InfoHash] = job
-	m.mu.Unlock()
 
 	switch resource.TaskState {
 	case models.TaskVerifying:
@@ -986,7 +1176,10 @@ func (m *TorrentManager) recoverResource(resource *models.Resource) {
 }
 
 // rewriteState 启动恢复时直接改写任务状态并落库（Downloading / RetryWait → Preparing）。
-func (m *TorrentManager) rewriteState(resource *models.Resource, to models.TaskState) {
+//
+// 落库采用 CAS 冲突重试：版本冲突时不能静默丢弃，否则数据库会停留在旧状态，
+// 下次重启无法按预期恢复。
+func (m *TorrentManager) rewriteState(resource *models.Resource, to models.TaskState) error {
 	fromVersion := resource.StateVersion
 	now := time.Now()
 	resource.TaskState = to
@@ -997,9 +1190,14 @@ func (m *TorrentManager) rewriteState(resource *models.Resource, to models.TaskS
 	resource.StateChangedAt = &now
 	resource.UpdateTime = &now
 	resource.NextRetryAt = nil
-	if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
-		logger.Torrent.Warn("恢复任务状态失败", slog.String("info_hash", resource.InfoHash), slog.Any("err", err))
+	if err := m.persistState(resource, fromVersion); err != nil {
+		logger.Torrent.Warn("恢复任务状态失败",
+			slog.String("info_hash", resource.InfoHash),
+			slog.Any("err", err),
+		)
+		return err
 	}
+	return nil
 }
 
 // waitRetryDelay 恢复 RetryWait 任务：到点后重新挂载并等待元信息。
@@ -1016,22 +1214,24 @@ func (m *TorrentManager) waitRetryDelay(resource *models.Resource) {
 	}
 	spec, magnet, torrentPath, err := m.specFromResource(row)
 	if err != nil {
+		m.rewriteState(row, models.TaskPreparing)
 		m.failResource(row, ErrKeyNoSource)
 		return
 	}
+	spec = m.withMetadataCache(row.LocalPath, row.InfoHash, spec)
 
 	job := m.newJob(row, magnet, torrentPath)
 	if _, err := job.Apply(models.EvRetryDelayElapsed, models.EventPayload{Now: time.Now()}); err != nil {
 		return
 	}
 	job.resetContext()
+	m.mu.Lock()
+	m.jobsMap[row.InfoHash] = job
+	m.mu.Unlock()
 	if err := m.attachTorrent(job, spec); err != nil {
 		m.markJobAttachFailed(job, classifyTorrentError(err))
 		return
 	}
-	m.mu.Lock()
-	m.jobsMap[row.InfoHash] = job
-	m.mu.Unlock()
 	go m.waitMetadata(job)
 }
 
@@ -1237,6 +1437,12 @@ func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int
 	if err != nil {
 		return "", false, err
 	}
+	// 重启后继续 / 重试同样优先复用元信息缓存。
+	baseDir := m.currentDownloadDir()
+	if resource.LocalPath != "" {
+		baseDir = resource.LocalPath
+	}
+	spec = m.withMetadataCache(baseDir, resource.InfoHash, spec)
 	return m.startJob(resource, spec, magnet, torrentPath, priority, e)
 }
 
@@ -1308,14 +1514,7 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	if resource.LocalPath != "" {
 		baseDir = resource.LocalPath
 	}
-	if len(spec.InfoBytes) == 0 {
-		if cached := readMetadataCache(baseDir, infoHash); cached != nil {
-			cached.PeerAddrs = append(cached.PeerAddrs, spec.PeerAddrs...)
-			cached.Sources = append(cached.Sources, spec.Sources...)
-			cached.Webseeds = append(cached.Webseeds, spec.Webseeds...)
-			spec = cached
-		}
-	}
+	spec = m.withMetadataCache(baseDir, infoHash, spec)
 
 	return m.startJob(resource, spec, magnet, torrentPath, priority, e)
 }
@@ -1357,11 +1556,15 @@ func (m *TorrentManager) startJob(resource *models.Resource, spec *torrent.Torre
 	resource.UpdateTime = &now
 
 	if resource.ID == 0 {
+		// 新任务在挂载 Torrent 之前先落库，保证应用在拉取元信息阶段崩溃后
+		// 重启仍能按 Preparing 状态自动恢复下载。
 		if err := m.ResourceDao.Save(resource); err != nil {
 			return resource.InfoHash, false, err
 		}
 	} else {
-		if _, err := m.ResourceDao.UpdateState(resource, fromVersion); err != nil {
+		// 已存在的爬虫记录必须在挂载前完成状态迁移落库，
+		// 冲突时重试，避免数据库停留在 Discovered 导致重启后不恢复。
+		if err := m.persistState(resource, fromVersion); err != nil {
 			return resource.InfoHash, false, err
 		}
 	}
@@ -1565,6 +1768,38 @@ func (m *TorrentManager) pieceCompletionForDir(dir string) (storage.PieceComplet
 	return pc, nil
 }
 
+// publicTrackers 公共 tracker，用于补齐只带 DHT / x.pe 的磁力链接。
+// 数量不宜过多，避免 announce 拖慢启动；来源可参考 https://github.com/ngosang/trackerslist。
+var publicTrackers = []string{
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://open.stealth.si:80/announce",
+	"udp://tracker.torrent.eu.org:451/announce",
+	"udp://tracker.openbittorrent.com:6969/announce",
+	"udp://explodie.org:6969/announce",
+	"udp://tracker.dler.org:6969/announce",
+	"udp://tracker.tiny-vps.com:6969/announce",
+	"udp://opentracker.io:6969/announce",
+	"udp://tracker1.bt.moack.co.kr:80/announce",
+	"http://tracker.openbittorrent.com:80/announce",
+}
+
+// mergePublicTrackers 把公共 tracker 追加到 spec，已存在的不重复添加。
+func mergePublicTrackers(spec *torrent.TorrentSpec) {
+	seen := make(map[string]struct{}, len(publicTrackers))
+	for _, tier := range spec.Trackers {
+		for _, url := range tier {
+			seen[url] = struct{}{}
+		}
+	}
+	for _, url := range publicTrackers {
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		spec.Trackers = append(spec.Trackers, []string{url})
+		seen[url] = struct{}{}
+	}
+}
+
 // attachTorrent 把 Torrent 加入客户端，使用任务自己的下载目录作为存储位置。
 // piece completion 持久化在同一目录，重启后继续下载时可直接跳过已完成分片。
 func (m *TorrentManager) attachTorrent(job *TorrentJob, spec *torrent.TorrentSpec) error {
@@ -1581,6 +1816,8 @@ func (m *TorrentManager) attachTorrent(job *TorrentJob, spec *torrent.TorrentSpe
 		return err
 	}
 	spec.Storage = storage.NewFileWithCompletion(baseDir, pc)
+	// 磁力通常只带 DHT 爬虫给出的 x.pe，补齐公共 tracker 才能拿到更多 peer
+	mergePublicTrackers(spec)
 
 	tt, _, err := m.client.AddTorrentSpec(spec)
 	if err != nil {
@@ -1623,14 +1860,7 @@ func (m *TorrentManager) restartTorrent(job *TorrentJob) error {
 	}
 
 	// 元信息已缓存时直接复用，避免每次重试都重新等待 DHT 拉取。
-	if len(spec.InfoBytes) == 0 {
-		if cached := readMetadataCache(baseDir, infoHash); cached != nil {
-			cached.PeerAddrs = append(cached.PeerAddrs, spec.PeerAddrs...)
-			cached.Sources = append(cached.Sources, spec.Sources...)
-			cached.Webseeds = append(cached.Webseeds, spec.Webseeds...)
-			spec = cached
-		}
-	}
+	spec = m.withMetadataCache(baseDir, infoHash, spec)
 	return m.attachTorrent(job, spec)
 }
 
@@ -1695,6 +1925,63 @@ func sourceAvailable(resource *models.Resource) bool {
 	return resource.TorrentPath != nil && strings.TrimSpace(*resource.TorrentPath) != ""
 }
 
+// OpenDownloadDir 打开已完成任务的下载目录。
+//
+// LocalPath 可能是文件也可能是目录：是目录就打开它，是文件就打开其所在目录。
+func (m *TorrentManager) OpenDownloadDir(infoHash string) error {
+	infoHash = strings.TrimSpace(infoHash)
+	if infoHash == "" {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+
+	resource, err := m.ResourceDao.GetByInfoHash(infoHash)
+	if err != nil {
+		logger.Torrent.Error("查询下载任务失败",
+			slog.String("info_hash", infoHash),
+			slog.Any("err", err),
+		)
+		return errors.New(ErrKeyOpenDirFailed)
+	}
+	if resource == nil {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+
+	path := strings.TrimSpace(resource.LocalPath)
+	if path == "" {
+		return errors.New(ErrKeyOpenDirFailed)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return errors.New(ErrKeyOpenDirFailed)
+	}
+	dir := path
+	if !fileInfo.IsDir() {
+		dir = filepath.Dir(path)
+	}
+
+	if err := openDirectory(dir); err != nil {
+		logger.Torrent.Error("打开下载目录失败",
+			slog.String("dir", dir),
+			slog.Any("err", err),
+		)
+		return errors.New(ErrKeyOpenDirFailed)
+	}
+	return nil
+}
+
+// openDirectory 调用系统文件管理器打开指定目录。
+func openDirectory(dir string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("explorer", dir).Start()
+	case "darwin":
+		return exec.Command("open", dir).Start()
+	default:
+		return exec.Command("xdg-open", dir).Start()
+	}
+}
+
 // ErrorKey 提取错误中的语言包 key，供上层（Service / 前端）翻译错误提示。
 func ErrorKey(err error) string {
 	return errorKeyOf(err)
@@ -1723,6 +2010,7 @@ func errorKeyOf(err error) string {
 		ErrKeyInvalidTransition,
 		ErrKeyRepairNotNeeded,
 		ErrKeyDeleteNotAllowed,
+		ErrKeyOpenDirFailed,
 	} {
 		if strings.Contains(message, key) {
 			return key

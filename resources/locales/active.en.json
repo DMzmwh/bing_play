@@ -115,6 +115,66 @@
     "description": "player - empty state hint when no video is loaded",
     "other": "Drag a local video file here to play it"
   },
+  "video.transcode.preparing": {
+    "description": "player - shown while detecting the video format before playback",
+    "other": "Preparing video..."
+  },
+  "video.transcode.converting": {
+    "description": "player - converting the video format (generic hint when the reason is unknown)",
+    "other": "Converting the video format..."
+  },
+  "video.transcode.reason.hevc_decoder_missing": {
+    "description": "player - HEVC decoder missing, conversion started",
+    "other": "HEVC decoder is missing on this system, converting the video format"
+  },
+  "video.transcode.reason.container_unsupported": {
+    "description": "player - unsupported container, conversion started",
+    "other": "This video container is not supported by the player, converting the video format"
+  },
+  "video.transcode.reason.video_codec_unsupported": {
+    "description": "player - unsupported video codec, conversion started",
+    "other": "This video codec is not supported by the player, converting the video format"
+  },
+  "video.transcode.reason.audio_codec_unsupported": {
+    "description": "player - unsupported audio codec, conversion started",
+    "other": "This audio codec is not supported by the player, converting the video format"
+  },
+  "video.transcode.reason.high_bit_depth": {
+    "description": "player - video bit depth too high, conversion started",
+    "other": "The video bit depth is too high, converting the video format"
+  },
+  "video.transcode.error.ffmpeg_missing": {
+    "description": "player - transcoding component not found",
+    "other": "Transcoding component not found, unable to convert the video format"
+  },
+  "video.transcode.error.insufficient_disk": {
+    "description": "player - not enough disk space to convert",
+    "other": "Not enough disk space to convert the video format"
+  },
+  "video.transcode.error.metered_network": {
+    "description": "player - conversion deferred on a metered network",
+    "other": "Metered network detected, video format conversion is deferred"
+  },
+  "video.transcode.error.probe_failed": {
+    "description": "player - unable to detect the video format",
+    "other": "Unable to detect the video format, playing the original file"
+  },
+  "video.transcode.error.canceled": {
+    "description": "player - conversion task canceled",
+    "other": "Video format conversion canceled"
+  },
+  "video.transcode.error.closed": {
+    "description": "player - transcoding service is closed",
+    "other": "Transcoding service is closed"
+  },
+  "video.transcode.error.convert_failed": {
+    "description": "player - conversion failed, falling back to the original file",
+    "other": "Video format conversion failed, falling back to the original file"
+  },
+  "video.transcode.error.not_found": {
+    "description": "player - transcoding task does not exist",
+    "other": "Transcoding task not found or already finished"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP API - request method not allowed",
@@ -412,6 +472,10 @@
     "description": "download center - repair button for missing files",
     "other": "Repair"
   },
+  "download.action.open_dir": {
+    "description": "download center - open download folder button",
+    "other": "Open Folder"
+  },
   "download.action.priority_up": {
     "description": "download center - raise priority button",
     "other": "Raise priority"
@@ -491,6 +555,10 @@
   "download.error.delete_not_allowed": {
     "description": "download error - deletion not allowed",
     "other": "This task cannot be deleted in the current state"
+  },
+  "download.error.open_dir_failed": {
+    "description": "download error - failed to open download folder",
+    "other": "Failed to open the download folder; it may have been moved or deleted"
   },
 
   "settings.title": {

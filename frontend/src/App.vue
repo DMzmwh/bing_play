@@ -1,5 +1,10 @@
 <template>
-  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
+  <n-config-provider
+    :theme="theme"
+    :theme-overrides="themeOverrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
+  >
     <n-message-provider>
       <Layout />
     </n-message-provider>
@@ -9,8 +14,19 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Layout from '@/views/Layout.vue';
-import { NConfigProvider, NMessageProvider, darkTheme } from 'naive-ui';
-import { initI18n, loadMessages, t } from '@/i18n';
+import {
+  NConfigProvider,
+  NMessageProvider,
+  darkTheme,
+  zhCN,
+  zhTW,
+  enUS,
+  dateZhCN,
+  dateZhTW,
+  dateEnUS,
+} from 'naive-ui';
+import type { NDateLocale, NLocale } from 'naive-ui';
+import { initI18n, i18nState, loadMessages, t } from '@/i18n';
 import { loadSettings, activeAccentColor, activeThemeMode } from '@/settings';
 
 import { Events, Updater } from "@wailsio/runtime";
@@ -20,6 +36,21 @@ void loadSettings();
 
 /** 界面主题来自系统设置，深色使用 Naive UI 深色主题，浅色使用默认主题 */
 const theme = computed(() => (activeThemeMode.value === 'dark' ? darkTheme : null));
+
+/** 语言代码 -> Naive UI 内置组件文案（分页、表格空态、确认框等） */
+const naiveLocaleMap: Record<string, [NLocale, NDateLocale]> = {
+  'zh-cn': [zhCN, dateZhCN],
+  'zh-tw': [zhTW, dateZhTW],
+  en: [enUS, dateEnUS],
+};
+
+/** 跟随当前语言，未匹配到语言包时回退英文 */
+const naiveLocale = computed(
+  () => naiveLocaleMap[i18nState.lang.toLowerCase()]?.[0] ?? enUS
+);
+const naiveDateLocale = computed(
+  () => naiveLocaleMap[i18nState.lang.toLowerCase()]?.[1] ?? dateEnUS
+);
 
 const cleanup = Events.On(
     Updater.Events.UpdateAvailable,

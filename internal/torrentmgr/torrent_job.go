@@ -59,9 +59,11 @@ type TorrentJob struct {
 	persistInterval  time.Duration // 进度落库间隔
 	stallTimeout     time.Duration // 无进展判定超时
 
-	notify      func(*vo.TorrentJobVO)              // 进度 / 完成时推送事件
-	persist     func(*models.Resource, uint64) bool // CAS 落库快照，返回是否写入成功
-	clearPieces func(*TorrentJob)                   // 清理该任务的分片完成记录
+	notify func(*vo.TorrentJobVO) // 进度 / 完成时推送事件
+	// persist CAS 落库快照，返回是否写入成功；allowRetry 为 true 时
+	// 表示状态迁移不得丢失，调用方会在版本冲突后基于最新版本重试。
+	persist     func(*models.Resource, uint64, bool) bool
+	clearPieces func(*TorrentJob) // 清理该任务的分片完成记录
 
 	// persistedVersion 最近一次成功写入数据库的 state_version。
 	// 仅当 CAS 写入成功后才推进，保证陈旧快照不会覆盖更新的状态。
@@ -76,7 +78,7 @@ type TorrentJob struct {
 func (job *TorrentJob) bind(
 	cfg DownloadConfig,
 	notify func(*vo.TorrentJobVO),
-	persist func(*models.Resource, uint64) bool,
+	persist func(*models.Resource, uint64, bool) bool,
 	clearPieces func(*TorrentJob),
 ) {
 	job.mu.Lock()
@@ -129,7 +131,9 @@ func (job *TorrentJob) apply(e models.Event, p models.EventPayload) (models.Resu
 	job.mu.Unlock()
 
 	if snapshot != nil {
-		job.saveSnapshot(snapshot, fromVersion)
+		// 进度事件只是周期采样，CAS 失败即丢弃陈旧快照；
+		// 其余事件都是状态迁移，冲突必须重试，保证数据库状态与内存一致。
+		job.saveSnapshot(snapshot, fromVersion, e != models.EvProgress)
 	}
 	if res.Effects&models.EffectClearPieces != 0 && job.clearPieces != nil {
 		job.clearPieces(job)
@@ -578,26 +582,45 @@ func (job *TorrentJob) snapshotResourceLocked() *models.Resource {
 }
 
 // saveSnapshot 以 CAS 方式写入数据库，失败只记录日志，不阻断下载。
-func (job *TorrentJob) saveSnapshot(resource *models.Resource, fromVersion uint64) bool {
+//
+// allowRetry 为 true 时代表状态迁移，版本冲突必须重试直至写入成功，
+// 避免数据库停留在旧状态导致重启后任务无法自动恢复；为 false 时代表
+// 周期进度快照，冲突说明已有更新的写入，直接丢弃陈旧快照。
+func (job *TorrentJob) saveSnapshot(resource *models.Resource, fromVersion uint64, allowRetry bool) bool {
 	if resource == nil || job.persist == nil {
 		return false
 	}
-	ok := job.persist(resource, fromVersion)
-	if ok {
-		job.mu.Lock()
-		if resource.StateVersion > job.persistedVersion {
-			job.persistedVersion = resource.StateVersion
-		}
-		job.mu.Unlock()
+	ok := job.persist(resource, fromVersion, allowRetry)
+	if !ok {
+		return false
 	}
-	return ok
+
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	if resource.StateVersion > job.persistedVersion {
+		job.persistedVersion = resource.StateVersion
+	}
+	// 冲突重试可能基于数据库最新版本推进了快照版本，同步回内存任务记录，
+	// 保证后续状态迁移以最新版本为基准，避免连续冲突。
+	if job.job != nil && resource.StateVersion > job.job.StateVersion {
+		job.job.StateVersion = resource.StateVersion
+	}
+	return true
 }
 
 // syncPersistedVersion 在 CAS 失败后同步数据库中的最新版本，避免后续写入持续冲突。
 func (job *TorrentJob) syncPersistedVersion(version uint64) {
 	job.mu.Lock()
-	job.persistedVersion = version
-	job.mu.Unlock()
+	defer job.mu.Unlock()
+
+	if version > job.persistedVersion {
+		job.persistedVersion = version
+	}
+	// 数据库版本领先说明内存快照已陈旧，对齐内存版本号，
+	// 避免后续状态迁移基于旧版本反复触发 CAS 冲突。
+	if job.job != nil && version > job.job.StateVersion {
+		job.job.StateVersion = version
+	}
 }
 
 // push 推送任务快照事件。

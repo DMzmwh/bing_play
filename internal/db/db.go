@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"os"
@@ -10,13 +11,14 @@ import (
 	"github.com/bing/bing-play/internal/logger"
 
 	"github.com/libtnb/sqlite"
+	"go.uber.org/fx"
 	"gorm.io/gorm"
 	_ "modernc.org/sqlite"
 )
 
 var DB *gorm.DB
 
-func InitDB(cfg *config.Config) *gorm.DB {
+func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
 	/////////////////////////////////////////////////////
 	// 原生 sql.DB
 	/////////////////////////////////////////////////////
@@ -47,6 +49,17 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 	sqlDB.SetConnMaxLifetime(0)
+
+	// 应用退出时关闭底层连接，让 SQLite 正常收尾（WAL 落盘、释放文件句柄）。
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			logger.App.Info("关闭数据库连接")
+			if err := sqlDB.Close(); err != nil {
+				logger.Error.Error("关闭数据库连接失败", slog.Any("err", err))
+			}
+			return nil
+		},
+	})
 	/////////////////////////////////////////////////////
 	// migration
 	/////////////////////////////////////////////////////

@@ -5,6 +5,7 @@ vars:
   RESOURCE_DIR: resources
   BIN_DIR: "bin"
   PACKAGE_MANAGER: '{{.PACKAGE_MANAGER | default "npm"}}'
+  # 前端 dev server 固定端口，需与 frontend/vite.config.ts 中的 9245 保持一致。
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
   # Target OS for build/package/run. Defaults to the host OS, and is overridden
   # by `wails3 build GOOS=...` (or the GOOS env var) for cross-compilation. The

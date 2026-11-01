@@ -9,6 +9,7 @@ import (
 
 	"github.com/bing/bing-play/internal/db/models"
 
+	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
@@ -240,6 +241,81 @@ func TestMetadataCacheRoundTrip(t *testing.T) {
 	}
 	if got := readMetadataCache(dir, infoHash); got != nil {
 		t.Fatal("损坏的缓存应返回 nil")
+	}
+}
+
+// TestWithMetadataCache 元信息缓存用于跳过重启后的 DHT 拉取，
+// 有缓存时必须优先使用，已有 InfoBytes 或没有缓存时保持原 spec。
+func TestWithMetadataCache(t *testing.T) {
+	dir := t.TempDir()
+
+	info := metainfo.Info{
+		Name:        "test.bin",
+		PieceLength: 16384,
+		Pieces:      make([]byte, 20),
+	}
+	raw, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatalf("编码测试元信息失败: %v", err)
+	}
+	mi := &metainfo.MetaInfo{InfoBytes: raw, Announce: "http://tracker.example/announce"}
+	infoHash := mi.HashInfoBytes().HexString()
+	if err := writeMetadataCache(dir, infoHash, mi); err != nil {
+		t.Fatalf("写入元信息缓存失败: %v", err)
+	}
+
+	spec, err := torrent.TorrentSpecFromMagnetUri("magnet:?xt=urn:btih:" + infoHash)
+	if err != nil {
+		t.Fatalf("构造磁力 spec 失败: %v", err)
+	}
+	spec.PeerAddrs = []string{"10.0.0.1:6881"}
+
+	m := &TorrentManager{}
+
+	cached := m.withMetadataCache(dir, infoHash, spec)
+	if cached == nil || len(cached.InfoBytes) == 0 {
+		t.Fatal("存在缓存时应返回带 InfoBytes 的 spec，跳过重新拉取元信息")
+	}
+	if cached.InfoHash.HexString() != infoHash {
+		t.Fatalf("缓存 InfoHash 不匹配: %q != %q", cached.InfoHash.HexString(), infoHash)
+	}
+	if len(cached.PeerAddrs) == 0 || cached.PeerAddrs[len(cached.PeerAddrs)-1] != "10.0.0.1:6881" {
+		t.Fatalf("缓存 spec 应合并原 spec 的 Peer 地址: %v", cached.PeerAddrs)
+	}
+
+	// 已经带元信息的 spec 无需再查缓存，原样返回。
+	if got := m.withMetadataCache(dir, infoHash, cached); got != cached {
+		t.Fatal("已有 InfoBytes 的 spec 应原样返回")
+	}
+
+	// 无缓存时返回原 spec，由调用方按磁力链接重新拉取。
+	other := &torrent.TorrentSpec{}
+	if got := m.withMetadataCache(t.TempDir(), "ffffffffffffffffffffffffffffffffffffffff", other); got != other {
+		t.Fatal("无缓存时应返回原 spec")
+	}
+
+	if got := m.withMetadataCache(dir, infoHash, nil); got != nil {
+		t.Fatal("nil spec 应返回 nil")
+	}
+}
+
+// TestRecoverTaskStatesMatchRecoverable 启动恢复的状态集合必须与状态机判定保持一致，
+// 避免新增状态后恢复列表漏项导致任务重启后不再继续下载。
+func TestRecoverTaskStatesMatchRecoverable(t *testing.T) {
+	seen := make(map[models.TaskState]bool, len(recoverTaskStates))
+	for _, state := range recoverTaskStates {
+		if seen[state] {
+			t.Fatalf("恢复状态 %v 重复声明", state)
+		}
+		seen[state] = true
+		if !state.Recoverable() {
+			t.Fatalf("恢复状态 %v 不属于可自动恢复集合", state)
+		}
+	}
+	for state := models.TaskState(0); state < models.TaskStateCount; state++ {
+		if state.Recoverable() && !seen[state] {
+			t.Fatalf("可自动恢复状态 %v 未包含在 recoverTaskStates", state)
+		}
 	}
 }
 

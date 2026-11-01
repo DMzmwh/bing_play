@@ -16,6 +16,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func init() {
 	// Register a custom event whose associated data type is string.
 	// This is not required, but the binding generator will pick up registered events
@@ -38,7 +41,7 @@ func main() {
 		}
 	}()
 
-	bz := app.NewApp(assets)
+	bz := app.NewApp(assets, app.AppIcon(appIcon))
 	if err := bz.Run(); err != nil {
 		logPath, _ := filepath.Abs("app.log")
 		_ = os.WriteFile(

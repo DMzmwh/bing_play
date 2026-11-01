@@ -26,5 +26,6 @@ func Load() *Config {
 		ResourceDir:    "resources",
 		CrawlerEnabled: true,
 		CrawlerPort:    51414,
+		ServerAddr:     "127.0.0.1:9090",
 	}
 }

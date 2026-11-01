@@ -5,19 +5,6 @@
                 <div class="title">{{ t('download.title') }}</div>
                 <div class="subtitle">{{ t('download.subtitle') }}</div>
             </div>
-            <div class="toolbar-right">
-                <span v-if="options" class="config">
-                    {{
-                        t('download.config', {
-                            MaxConcurrent: options.maxConcurrent,
-                            MaxRetries: options.maxRetries
-                        })
-                    }}
-                </span>
-                <n-button size="small" :loading="loading" @click="refresh">
-                    {{ t('download.refresh') }}
-                </n-button>
-            </div>
         </div>
 
         <n-alert
@@ -93,16 +80,15 @@ import { Events } from '@wailsio/runtime'
 import { t } from '@/i18n'
 import {
     Cancel,
-    GetOptions,
     ListActive,
     ListCompleted,
+    OpenDownloadDir,
     Pause,
     Repair,
     Resume,
     Retry,
     SetPriority
 } from '../../bindings/github.com/bing/bing-play/internal/service/torrentservice'
-import type { DownloadOptions } from '../../bindings/github.com/bing/bing-play/internal/service/models'
 import type { TorrentJobVO } from '../../bindings/github.com/bing/bing-play/internal/torrentmgr/models/vo/models'
 
 /** 与后端 download.go 保持一致的事件名 */
@@ -131,8 +117,6 @@ const INACTIVE_DISPLAY = new Set([
 const activeJobs = ref<TorrentJobVO[]>([])
 /** 已完成的任务：仅在打开页面时查询一次数据库 */
 const completedJobs = ref<TorrentJobVO[]>([])
-const options = ref<DownloadOptions | null>(null)
-const loading = ref(false)
 const loadError = ref(false)
 /** 当前标签页：下载中（未完成）/ 下载完成 */
 const tab = ref<'active' | 'completed'>('active')
@@ -273,12 +257,10 @@ function upsert(payload: TorrentJobVO | null | undefined) {
 
 /**
  * 拉取下载中任务：只读取后端内存，不查询数据库。
- * showLoading 仅用于首次加载和手动刷新，定时轮询完全静默。
+ * showLoading 仅用于首次加载时的失败提示，定时轮询完全静默。
  */
 async function loadActive(showLoading = false) {
     console.log('加载下载中任务')
-    
-    if (showLoading) loading.value = true
 
     const previousStates = new Map(activeJobs.value.map((job) => [job.infoHash, job.taskState]))
     try {
@@ -293,10 +275,8 @@ async function loadActive(showLoading = false) {
         if (completedMissed) void loadCompleted()
     } catch (error) {
         console.warn('加载下载任务失败:', error)
-        // 定时刷新失败不打断界面，仅首次加载或手动刷新时提示
+        // 定时刷新失败不打断界面，仅首次加载时提示
         if (showLoading && !loadError.value) loadError.value = true
-    } finally {
-        if (showLoading) loading.value = false
     }
 }
 
@@ -307,20 +287,6 @@ async function loadCompleted(showError = false) {
     } catch (error) {
         console.warn('加载已完成任务失败:', error)
         if (showError && !loadError.value) loadError.value = true
-    }
-}
-
-/** 手动刷新：只刷新下载中列表，已完成列表保持页面打开时的结果 */
-function refresh() {
-    void loadActive(true)
-}
-
-/** 拉取下载参数，用于展示并发与重试策略 */
-async function loadOptions() {
-    try {
-        options.value = await GetOptions()
-    } catch (error) {
-        console.warn('加载下载参数失败:', error)
     }
 }
 
@@ -598,14 +564,19 @@ const completedColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
     {
         key: 'actions',
         title: t('download.actions_label'),
-        width: 100,
+        width: 160,
         fixed: 'right',
         render: (row) =>
-            canRepair(row)
-                ? textButton(t('download.action.repair'), () =>
-                      void runAction(() => Repair(row.infoHash))
-                  )
-                : null
+            h('div', { class: 'actions' }, [
+                textButton(t('download.action.open_dir'), () =>
+                    void runAction(() => OpenDownloadDir(row.infoHash))
+                ),
+                canRepair(row)
+                    ? textButton(t('download.action.repair'), () =>
+                          void runAction(() => Repair(row.infoHash))
+                      )
+                    : null
+            ])
     }
 ])
 
@@ -621,7 +592,7 @@ onMounted(async () => {
         upsert(event.data as TorrentJobVO)
     )
 
-    await Promise.all([loadActive(true), loadCompleted(true), loadOptions()])
+    await Promise.all([loadActive(true), loadCompleted(true)])
 
     // 仅轮询下载中任务（内存数据）；已完成列表不参与定时刷新
     refreshTimer = setInterval(() => {
@@ -674,19 +645,6 @@ onBeforeUnmount(() => {
 .subtitle {
     font-size: 12px;
     color: var(--app-text-muted);
-    white-space: nowrap;
-}
-
-.toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-}
-
-.config {
-    color: var(--app-text-muted);
-    font-size: 12px;
     white-space: nowrap;
 }
 

@@ -8,6 +8,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ArtPlayer: typeof import('./src/components/ArtPlayer.vue')['default']
+    BrandIcon: typeof import('./src/components/BrandIcon.vue')['default']
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
     NAlert: typeof import('naive-ui')['NAlert']
     NButton: typeof import('naive-ui')['NButton']
@@ -19,6 +20,7 @@ declare module 'vue' {
     NInput: typeof import('naive-ui')['NInput']
     NInputNumber: typeof import('naive-ui')['NInputNumber']
     NPopconfirm: typeof import('naive-ui')['NPopconfirm']
+    NProgress: typeof import('naive-ui')['NProgress']
     NSelect: typeof import('naive-ui')['NSelect']
     NSpin: typeof import('naive-ui')['NSpin']
     NSwitch: typeof import('naive-ui')['NSwitch']

@@ -115,6 +115,66 @@
     "description": "播放区 - 无视频时的空状态说明",
     "other": "将本地视频文件拖到此处即可播放"
   },
+  "video.transcode.preparing": {
+    "description": "播放区 - 播放前探测视频格式时的提示",
+    "other": "正在准备播放…"
+  },
+  "video.transcode.converting": {
+    "description": "播放区 - 正在转换视频格式（无法识别具体原因时的通用提示）",
+    "other": "正在转换播放格式…"
+  },
+  "video.transcode.reason.hevc_decoder_missing": {
+    "description": "播放区 - 系统缺少 HEVC 解码器，开始转换",
+    "other": "当前系统缺少 HEVC 解码器，正在转换播放格式"
+  },
+  "video.transcode.reason.container_unsupported": {
+    "description": "播放区 - 播放器不支持视频封装格式，开始转换",
+    "other": "当前播放器不支持该视频封装格式，正在转换播放格式"
+  },
+  "video.transcode.reason.video_codec_unsupported": {
+    "description": "播放区 - 播放器不支持视频编码，开始转换",
+    "other": "当前播放器不支持该视频编码，正在转换播放格式"
+  },
+  "video.transcode.reason.audio_codec_unsupported": {
+    "description": "播放区 - 播放器不支持音频编码，开始转换",
+    "other": "当前播放器不支持该音频编码，正在转换播放格式"
+  },
+  "video.transcode.reason.high_bit_depth": {
+    "description": "播放区 - 视频位深过高，开始转换",
+    "other": "视频色彩位深过高，正在转换播放格式"
+  },
+  "video.transcode.error.ffmpeg_missing": {
+    "description": "播放区 - 未找到转码组件",
+    "other": "未找到转码组件，无法转换播放格式"
+  },
+  "video.transcode.error.insufficient_disk": {
+    "description": "播放区 - 磁盘空间不足，无法转换",
+    "other": "磁盘空间不足，无法转换播放格式"
+  },
+  "video.transcode.error.metered_network": {
+    "description": "播放区 - 计费网络下暂缓转换",
+    "other": "当前网络为计费网络，已暂缓格式转换"
+  },
+  "video.transcode.error.probe_failed": {
+    "description": "播放区 - 无法识别视频格式",
+    "other": "无法识别视频格式，将直接播放原文件"
+  },
+  "video.transcode.error.canceled": {
+    "description": "播放区 - 转换任务被取消",
+    "other": "视频格式转换已取消"
+  },
+  "video.transcode.error.closed": {
+    "description": "播放区 - 转码服务已关闭",
+    "other": "转码服务已关闭"
+  },
+  "video.transcode.error.convert_failed": {
+    "description": "播放区 - 转换失败，回退原文件",
+    "other": "视频格式转换失败，已回退原文件播放"
+  },
+  "video.transcode.error.not_found": {
+    "description": "播放区 - 转换任务不存在",
+    "other": "转码任务不存在或已结束"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP 接口 - 请求方法不支持",
@@ -412,6 +472,10 @@
     "description": "下载中心 - 按钮：修复文件丢失",
     "other": "修复"
   },
+  "download.action.open_dir": {
+    "description": "下载中心 - 按钮：打开下载目录",
+    "other": "打开目录"
+  },
   "download.action.priority_up": {
     "description": "下载中心 - 按钮：提高优先级",
     "other": "提高优先级"
@@ -491,6 +555,10 @@
   "download.error.delete_not_allowed": {
     "description": "下载错误 - 不允许删除",
     "other": "当前状态不允许删除"
+  },
+  "download.error.open_dir_failed": {
+    "description": "下载错误 - 打开下载目录失败",
+    "other": "打开下载目录失败，目录可能已被移动或删除"
   },
 
   "settings.title": {

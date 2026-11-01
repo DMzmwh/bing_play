@@ -16,6 +16,7 @@ import (
 	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
+	"github.com/bing/bing-play/internal/transcode"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/fx"
@@ -26,7 +27,10 @@ type App struct {
 	wailsApp *application.App
 }
 
-func NewApp(assets embed.FS) *App {
+// AppIcon 窗口图标 PNG 数据，由 main 从 build/appicon.png 嵌入后传入。
+type AppIcon []byte
+
+func NewApp(assets embed.FS, icon AppIcon) *App {
 	a := &App{}
 	a.fxApp = fx.New(
 		// =========================
@@ -53,10 +57,12 @@ func NewApp(assets embed.FS) *App {
 		service.Module,
 		torrentmgr.Module,
 		dhtcrawler.Module,
+		transcode.Module,
 		// =========================
 		// Wails assets
 		// =========================
 		fx.Supply(assets),
+		fx.Supply(icon),
 		// 强制让后台服务进入 Fx 生命周期
 		fx.Invoke(func(
 			_ *server.Server,

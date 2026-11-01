@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/logger"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ type Server struct {
 }
 
 func NewServer(
+	cfg *config.Config,
 	route *Route,
 	lc fx.Lifecycle,
 ) *Server {
@@ -25,7 +27,7 @@ func NewServer(
 	s := &Server{
 		mux: mux,
 		httpServer: &http.Server{
-			Addr:    "127.0.0.1:9090",
+			Addr:    cfg.ServerAddr,
 			Handler: mux,
 		},
 	}
@@ -108,4 +110,15 @@ func NewServer(
 // 获取路由
 func (s *Server) Mux() *http.ServeMux {
 	return s.mux
+}
+
+// Close 立即关闭监听与所有活动连接。
+//
+// 应用退出时由 Wails 的 OnShutdown 先调用，保证 HTTP 请求先停止，
+// 之后才关闭下载引擎等底层资源，避免退出过程中仍有请求访问已释放的资源。
+func (s *Server) Close() error {
+	if s.httpServer == nil {
+		return nil
+	}
+	return s.httpServer.Close()
 }

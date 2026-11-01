@@ -1,6 +1,8 @@
 <template>
     <div class="app">
         <div class="top-bar">
+            <!-- 品牌主图标：B / 兵 字形，尺寸 26px，与 50px 导航栏垂直居中 -->
+            <BrandIcon class="nav-logo" variant="nav" :size="26" />
             <div class="left-tabs">
                 <div
                     v-for="item in tabs"
@@ -63,6 +65,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Window } from "@wailsio/runtime";
 import { i18nState, setLang, t } from "@/i18n";
+import BrandIcon from "@/components/BrandIcon.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -126,6 +129,12 @@ const refresh = () => window.location.reload();
     background: var(--app-surface);
     border-bottom: 1px solid var(--app-border);
     user-select: none;
+}
+
+/* 主图标与标签组之间保持 14px 间距，图标自身不参与点击和拖拽 */
+.nav-logo {
+    margin-right: 14px;
+    pointer-events: none;
 }
 
 .left-tabs {

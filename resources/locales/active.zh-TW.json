@@ -115,6 +115,66 @@
     "description": "播放區 - 無影片時的空狀態說明",
     "other": "將本機影片檔案拖到此處即可播放"
   },
+  "video.transcode.preparing": {
+    "description": "播放區 - 播放前偵測影片格式時的提示",
+    "other": "正在準備播放…"
+  },
+  "video.transcode.converting": {
+    "description": "播放區 - 正在轉換影片格式（無法辨識具體原因時的通用提示）",
+    "other": "正在轉換播放格式…"
+  },
+  "video.transcode.reason.hevc_decoder_missing": {
+    "description": "播放區 - 系統缺少 HEVC 解碼器，開始轉換",
+    "other": "目前系統缺少 HEVC 解碼器，正在轉換播放格式"
+  },
+  "video.transcode.reason.container_unsupported": {
+    "description": "播放區 - 播放器不支援影片封裝格式，開始轉換",
+    "other": "目前播放器不支援該影片封裝格式，正在轉換播放格式"
+  },
+  "video.transcode.reason.video_codec_unsupported": {
+    "description": "播放區 - 播放器不支援影片編碼，開始轉換",
+    "other": "目前播放器不支援該影片編碼，正在轉換播放格式"
+  },
+  "video.transcode.reason.audio_codec_unsupported": {
+    "description": "播放區 - 播放器不支援音訊編碼，開始轉換",
+    "other": "目前播放器不支援該音訊編碼，正在轉換播放格式"
+  },
+  "video.transcode.reason.high_bit_depth": {
+    "description": "播放區 - 影片位元深度過高，開始轉換",
+    "other": "影片色彩位元深度過高，正在轉換播放格式"
+  },
+  "video.transcode.error.ffmpeg_missing": {
+    "description": "播放區 - 未找到轉碼元件",
+    "other": "未找到轉碼元件，無法轉換播放格式"
+  },
+  "video.transcode.error.insufficient_disk": {
+    "description": "播放區 - 磁碟空間不足，無法轉換",
+    "other": "磁碟空間不足，無法轉換播放格式"
+  },
+  "video.transcode.error.metered_network": {
+    "description": "播放區 - 計費網路下暫緩轉換",
+    "other": "目前網路為計費網路，已暫緩格式轉換"
+  },
+  "video.transcode.error.probe_failed": {
+    "description": "播放區 - 無法辨識影片格式",
+    "other": "無法辨識影片格式，將直接播放原始檔案"
+  },
+  "video.transcode.error.canceled": {
+    "description": "播放區 - 轉換任務被取消",
+    "other": "影片格式轉換已取消"
+  },
+  "video.transcode.error.closed": {
+    "description": "播放區 - 轉碼服務已關閉",
+    "other": "轉碼服務已關閉"
+  },
+  "video.transcode.error.convert_failed": {
+    "description": "播放區 - 轉換失敗，回退原始檔案",
+    "other": "影片格式轉換失敗，已回退原始檔案播放"
+  },
+  "video.transcode.error.not_found": {
+    "description": "播放區 - 轉換任務不存在",
+    "other": "轉碼任務不存在或已結束"
+  },
 
   "http.error_method_not_allowed": {
     "description": "HTTP 介面 - 請求方法不支援",
@@ -412,6 +472,10 @@
     "description": "下載中心 - 按鈕：修復檔案遺失",
     "other": "修復"
   },
+  "download.action.open_dir": {
+    "description": "下載中心 - 按鈕：開啟下載目錄",
+    "other": "開啟目錄"
+  },
   "download.action.priority_up": {
     "description": "下載中心 - 按鈕：提高優先順序",
     "other": "提高優先順序"
@@ -491,6 +555,10 @@
   "download.error.delete_not_allowed": {
     "description": "下載錯誤 - 不允許刪除",
     "other": "目前狀態不允許刪除"
+  },
+  "download.error.open_dir_failed": {
+    "description": "下載錯誤 - 開啟下載目錄失敗",
+    "other": "開啟下載目錄失敗，目錄可能已被移動或刪除"
   },
 
   "settings.title": {

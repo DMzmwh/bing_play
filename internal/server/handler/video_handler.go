@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/bing/bing-play/internal/db/dao"
@@ -16,6 +17,7 @@ import (
 	"github.com/bing/bing-play/internal/server"
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
+	"github.com/bing/bing-play/internal/transcode"
 
 	"github.com/anacrolix/torrent"
 	"go.uber.org/fx"
@@ -26,6 +28,7 @@ type VideoHandler struct {
 	videoService   *service.VideoService
 	i18nService    *i18n.I18nService
 	torrentManager *torrentmgr.TorrentManager
+	transcoder     *transcode.Scheduler
 }
 
 type VideoHandlerParams struct {
@@ -34,6 +37,7 @@ type VideoHandlerParams struct {
 	VideoService   *service.VideoService
 	I18n           *i18n.I18nService
 	TorrentManager *torrentmgr.TorrentManager
+	Transcoder     *transcode.Scheduler
 }
 
 func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
@@ -43,6 +47,7 @@ func NewVideoHandler(params VideoHandlerParams) *VideoHandler {
 		videoService:   params.VideoService,
 		i18nService:    params.I18n,
 		torrentManager: params.TorrentManager,
+		transcoder:     params.Transcoder,
 	}
 }
 
@@ -56,6 +61,9 @@ func VideoRoute(h *VideoHandler) server.RouteOut {
 func (h *VideoHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("/video/open", h.OpenLocal)
+	mux.HandleFunc("/video/prepare/{id}", h.Prepare)
+	mux.HandleFunc("/video/transcode/{jobId}", h.TranscodeStatus)
+	mux.HandleFunc("/video/cache/{name}", h.VideoCache)
 	mux.HandleFunc("/video/{id}", h.Video)
 	mux.HandleFunc("/video/local/{id}", h.VideoLocal)
 	mux.HandleFunc("/stream/{id}", h.Stream)
@@ -129,6 +137,278 @@ func (h *VideoHandler) writeOpenLocalError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	}
 	http.Error(w, h.i18nService.T(err.Error(), nil), status)
+}
+
+// prepareVideoResponse /video/prepare 与 /video/transcode/{jobId} 的返回结构。
+//
+// URL 为空表示由前端继续使用原视频地址；Message 是后端按当前语言生成好的提示文案。
+type prepareVideoResponse struct {
+	ID       int64            `json:"id,omitempty"`
+	URL      string           `json:"url,omitempty"`
+	Action   transcode.Action `json:"action"`
+	JobID    string           `json:"jobId,omitempty"`
+	Phase    transcode.Phase  `json:"phase,omitempty"`
+	Progress float64          `json:"progress"`
+	Message  string           `json:"message,omitempty"`
+}
+
+// 转码缓存文件名：调度器用 sha256 前 24 位加 .mp4 命名，只允许这类文件被读取。
+var transcodeCacheNamePattern = regexp.MustCompile(`^[a-f0-9]{24}\.mp4$`)
+
+// Prepare 返回播放地址前先探测格式并按需异步转码。
+//
+// 返回体里的 action 决定前端的后续动作：
+//   - play_direct / fallback / defer：直接播放 url（fallback 时附带 message）；
+//   - convert：携带 jobId，前端轮询 /video/transcode/{jobId}；
+//   - play_converted：播放转换后的缓存地址。
+func (h *VideoHandler) Prepare(w http.ResponseWriter, r *http.Request) {
+	h.allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, h.i18nService.T("http.error_method_not_allowed", nil), http.StatusMethodNotAllowed)
+		return
+	}
+
+	resource, err := h.resourceDao.Get(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, h.i18nService.T("video.error_query_failed", nil), http.StatusInternalServerError)
+		return
+	}
+	if resource == nil {
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+		return
+	}
+
+	direct := prepareVideoResponse{
+		ID:     resource.ID,
+		URL:    videoURL(r, resource.ID),
+		Action: transcode.ActionPlayDirect,
+	}
+
+	// 边下边播的种子任务还没有完整本地文件，无法转码，直接播放原地址。
+	if !localPlayable(resource) {
+		h.writePrepare(w, direct)
+		return
+	}
+
+	filePath, errKey, status := localFilePath(resource)
+	if errKey != "" {
+		http.Error(w, h.i18nService.T(errKey, nil), status)
+		return
+	}
+
+	if h.transcoder == nil || !h.transcoder.Binaries().Available() {
+		direct.Action = transcode.ActionFallback
+		direct.Message = h.transcodeMessage(transcode.ReasonFFmpegMissing)
+		h.writePrepare(w, direct)
+		return
+	}
+
+	decision, _, err := h.transcoder.Plan(r.Context(), transcode.Request{Path: filePath})
+	if err != nil {
+		// 探测失败不影响播放：回退原文件，由播放器自行决定。
+		direct.Action = transcode.ActionFallback
+		direct.Message = h.transcodeMessage(transcode.ReasonProbeFailed)
+		h.writePrepare(w, direct)
+		return
+	}
+
+	switch decision.Action {
+	case transcode.ActionConvert:
+		resp := h.jobResponse(r, h.transcoder.Submit(transcode.Request{Path: filePath}), resource.ID)
+		if resp.Phase != transcode.PhaseDone && resp.Phase != transcode.PhaseCanceled {
+			// 立即提示“正在转换”，避免整个转换过程都显示笼统的准备中
+			resp.Message = h.transcodeReasonMessage(decision.Reason)
+		}
+		h.writePrepare(w, resp)
+	case transcode.ActionPlayDirect:
+		h.writePrepare(w, direct)
+	default:
+		direct.Action = decision.Action
+		direct.Message = h.transcodeMessage(decision.Reason)
+		h.writePrepare(w, direct)
+	}
+}
+
+// TranscodeStatus 返回转换任务进度快照，供前端轮询。
+func (h *VideoHandler) TranscodeStatus(w http.ResponseWriter, r *http.Request) {
+	h.allowCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, h.i18nService.T("http.error_method_not_allowed", nil), http.StatusMethodNotAllowed)
+		return
+	}
+	if h.transcoder == nil {
+		http.Error(w, h.i18nService.T("video.error_service_unavailable", nil), http.StatusServiceUnavailable)
+		return
+	}
+
+	job, ok := h.transcoder.JobByID(r.PathValue("jobId"))
+	if !ok {
+		http.Error(w, h.i18nService.T("video.transcode.error.not_found", nil), http.StatusNotFound)
+		return
+	}
+	h.writePrepare(w, h.jobResponse(r, job, 0))
+}
+
+// VideoCache 输出转码缓存文件，支持 Range 以便拖动进度条。
+func (h *VideoHandler) VideoCache(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !transcodeCacheNamePattern.MatchString(name) {
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+		return
+	}
+	if h.transcoder == nil {
+		http.Error(w, h.i18nService.T("video.error_service_unavailable", nil), http.StatusServiceUnavailable)
+		return
+	}
+
+	filePath := filepath.Join(h.transcoder.CacheDir(), name)
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+		return
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		http.Error(w, h.i18nService.T("video.error_stat_failed", nil), http.StatusInternalServerError)
+		return
+	}
+
+	http.ServeContent(w, r, name, info.ModTime(), file)
+}
+
+// jobResponse 把任务快照转换为前端可直接使用的播放准备结果。
+func (h *VideoHandler) jobResponse(r *http.Request, job *transcode.Job, id int64) prepareVideoResponse {
+	snapshot := job.Snapshot()
+	resp := prepareVideoResponse{
+		ID:       id,
+		Action:   transcode.ActionConvert,
+		JobID:    job.ID,
+		Phase:    snapshot.Phase,
+		Progress: snapshot.Progress,
+	}
+	if snapshot.Phase != transcode.PhaseDone && snapshot.Phase != transcode.PhaseCanceled {
+		if snapshot.Phase == transcode.PhaseConverting {
+			resp.Message = h.transcodeReasonMessage(snapshot.Reason)
+		}
+		return resp
+	}
+
+	result, _ := job.Result()
+	resp.Action = result.Action
+
+	if result.Action == transcode.ActionPlayConverted && result.PlayPath != "" {
+		resp.URL = cacheFileURL(r, result.PlayPath)
+		return resp
+	}
+
+	resp.URL = videoURL(r, id)
+	if result.Err != nil {
+		resp.Message = h.transcodeMessage(result.Reason)
+	}
+	return resp
+}
+
+func (h *VideoHandler) writePrepare(w http.ResponseWriter, resp prepareVideoResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *VideoHandler) allowCORS(w http.ResponseWriter) {
+	// 浏览器调试模式（vite）与 127.0.0.1:9090 属于跨域请求
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+// transcodeMessage 把转换决策原因映射为当前语言的提示文案。
+func (h *VideoHandler) transcodeMessage(reason transcode.Reason) string {
+	return h.i18nService.T(transcodeReasonKey(reason), nil)
+}
+
+// transcodeReasonMessage 返回转换中的提示：能识别原因时说明具体原因，否则用通用文案。
+func (h *VideoHandler) transcodeReasonMessage(reason transcode.Reason) string {
+	if reason == "" || reason == transcode.ReasonCompatible {
+		return h.i18nService.T("video.transcode.converting", nil)
+	}
+	return h.transcodeMessage(reason)
+}
+
+func transcodeReasonKey(reason transcode.Reason) string {
+	switch reason {
+	case transcode.ReasonHEVCDecoderMissing:
+		return "video.transcode.reason.hevc_decoder_missing"
+	case transcode.ReasonContainerUnsupported:
+		return "video.transcode.reason.container_unsupported"
+	case transcode.ReasonVideoUnsupported:
+		return "video.transcode.reason.video_codec_unsupported"
+	case transcode.ReasonAudioUnsupported:
+		return "video.transcode.reason.audio_codec_unsupported"
+	case transcode.ReasonHighBitDepth:
+		return "video.transcode.reason.high_bit_depth"
+	case transcode.ReasonFFmpegMissing:
+		return "video.transcode.error.ffmpeg_missing"
+	case transcode.ReasonInsufficientDisk:
+		return "video.transcode.error.insufficient_disk"
+	case transcode.ReasonMeteredNetwork:
+		return "video.transcode.error.metered_network"
+	case transcode.ReasonProbeFailed:
+		return "video.transcode.error.probe_failed"
+	case transcode.ReasonCanceled:
+		return "video.transcode.error.canceled"
+	case transcode.ReasonClosed:
+		return "video.transcode.error.closed"
+	default:
+		return "video.transcode.error.convert_failed"
+	}
+}
+
+// localPlayable 本地视频或已校验完成的种子资源可以读取本地文件。
+func localPlayable(resource *models.Resource) bool {
+	return resource.Kind == models.KindLocal ||
+		(resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent)
+}
+
+// localFilePath 解析资源对应的本地文件；资源路径是目录时使用记录中的文件名。
+// 返回空 errKey 表示解析成功。
+func localFilePath(resource *models.Resource) (string, string, int) {
+	if resource.LocalPath == "" {
+		return "", "video.error_empty_path", http.StatusNotFound
+	}
+
+	info, err := os.Stat(resource.LocalPath)
+	if err != nil {
+		return "", "video.error_not_found", http.StatusNotFound
+	}
+	if !info.IsDir() {
+		return resource.LocalPath, "", 0
+	}
+
+	fileName := ""
+	if resource.FileName != nil {
+		fileName = *resource.FileName
+	}
+	if fileName == "" {
+		return "", "video.error_file_required", http.StatusBadRequest
+	}
+	return filepath.Join(resource.LocalPath, fileName), "", 0
+}
+
+func videoURL(r *http.Request, id int64) string {
+	return fmt.Sprintf("http://%s/video/%d", r.Host, id)
+}
+
+func cacheFileURL(r *http.Request, path string) string {
+	return fmt.Sprintf("http://%s/video/cache/%s", r.Host, filepath.Base(path))
 }
 
 func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {
