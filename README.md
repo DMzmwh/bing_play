@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Bing Play is a cross-platform desktop BitTorrent client that combines a DHT resource crawler, a download manager, and a built-in streaming video player. It is built with Wails v3 (Go + Vue 3) and runs as a single native application on Windows, macOS, and Linux.
+Bing Play is a cross-platform desktop BitTorrent client that combines a DHT resource crawler, a download manager, a built-in streaming video player and live TV (IPTV) playback. It is built with Wails v3 (Go + Vue 3) and runs as a single native application on Windows, macOS, and Linux.
 
 The project is local-first: resources discovered by the crawler, download tasks, settings and playback history are stored in a local SQLite database. No account, cloud service or external backend is required.
 
@@ -16,13 +16,14 @@ Bing Play ("兵 Play") is a personal media toolbox for peer-to-peer content:
 - Discovered resources are listed in a searchable, sortable resource browser and can be queued for download individually or in batches.
 - Downloads run in the background with priority scheduling, automatic retries, stall detection and restart recovery.
 - Downloaded or local video files can be played in an embedded ArtPlayer, including streaming directly from a torrent while it is still downloading.
+- A built-in M3U subscription is synchronized in the background, and its channels can be browsed by group and played as live HLS streams.
 
 ### Design goals
 
-- **Local-first**: everything runs on the user's machine; the only network traffic is BitTorrent/DHT and optional update checks.
+- **Local-first**: everything runs on the user's machine; the only network traffic is BitTorrent/DHT, the IPTV subscription and its live streams, and optional update checks.
 - **One binary**: the frontend is embedded into the Go binary via `go:embed`; runtime assets (locales, migrations, ffmpeg) ship in a sibling `resources` directory.
-- **Explicit lifecycle**: every background service (HTTP server, DHT crawler, download engine) is wired through Fx lifecycle hooks and shut down in a deterministic order.
-- **Typed IPC over HTTP only for streaming**: business calls go through Wails bindings; the local HTTP server exists solely to serve video bytes with `Range` support.
+- **Explicit lifecycle**: every background service (HTTP server, DHT crawler, download engine, IPTV sync loop) is wired through Fx lifecycle hooks and shut down in a deterministic order.
+- **Typed IPC over HTTP only for streaming**: business calls go through Wails bindings; the local HTTP server serves video bytes with `Range` support and proxies IPTV playlists/segments when direct playback fails.
 - **Bilingual by design**: every user-facing string comes from backend locale files (`en`, `zh-CN`, `zh-TW`), including player UI text.
 
 ### Who it is for
@@ -30,7 +31,7 @@ Bing Play ("兵 Play") is a personal media toolbox for peer-to-peer content:
 - Users who want a lightweight desktop torrent client with integrated playback and no browser plugins.
 - Developers looking for a reference Wails v3 application that combines Fx dependency injection, GORM/SQLite, `anacrolix/torrent`, a DHT crawler and FFmpeg-based transcoding.
 
-> Current scope note: the "Find" (`/find`) and "Library" (`/library`) pages are navigation placeholders in this version. The implemented pages are Play, Download, Resources and Settings.
+> Current scope note: the "Find" (`/find`) and "Library" (`/library`) pages are navigation placeholders in this version. The implemented pages are Play, Download, Resources, TV and Settings.
 
 ## Tech Stack
 
@@ -59,8 +60,9 @@ Bing Play ("兵 Play") is a personal media toolbox for peer-to-peer content:
 | Vue | `3.5.41` | UI framework (Composition API) |
 | TypeScript | `5.7.3` | Type safety (checked by `vue-tsc`) |
 | Naive UI | `2.45.3` | Component library, theming |
-| Vue Router | `4.5.1` | Page routing (`/play`, `/download`, `/resources`, `/find`, `/library`, `/settings`) |
+| Vue Router | `4.5.1` | Page routing (`/play`, `/download`, `/resources`, `/tv`, `/find`, `/library`, `/settings`) |
 | ArtPlayer | `5.4.0` | Video player |
+| hls.js | `1.7.4` | HLS playback for live TV channels |
 | Vite | `6.4.1` | Dev server and production build |
 | `@wailsio/runtime` | latest | Bindings, events, updater events |
 | `@vicons/ionicons5`, `vfonts` | `^0.13.0`, `0.0.3` | Icon set and fonts |
@@ -174,6 +176,19 @@ npm --prefix frontend run build   # vue-tsc + production frontend build
   - Convert to H.264 + AAC MP4 with `+faststart`; conversion progress is polled via `/video/transcode/{jobId}`.
 - Local files and completed torrents are served from `/video/{id}` with `Range` support, so seeking works the same way.
 
+### Live TV (IPTV)
+
+- Ships with one enabled M3U subscription (`IPTV 合集`, sourced from `IPTV-Sources`); no account or manual configuration is required.
+- Channels are parsed from the M3U (`#EXTINF`, `group-title`, `tvg-*` attributes), stored in SQLite and exposed through an in-memory snapshot; the backend pushes `tv:channels-updated` after a successful sync so the page reloads without polling.
+- Channel list: collapsible groups, keyword search across name / `tvg-name` / group, and a virtual list for groups with more than 100 channels. The panel width is resizable (200–360 px) and shares `ui.sidebar_width` with the play page.
+- Playback: ArtPlayer + hls.js, with previous/next channel switching. If direct playback fails once (network/CORS/403), the app retries that source through the local `/tv/proxy` endpoint, which rewrites playlist URIs and forwards the required `User-Agent` / `Referer`.
+- Sync scheduling:
+  - Automatic refresh every 6 hours; a source that has never synchronized retries every minute until its first success.
+  - A failed 6-hour refresh keeps the previous channel data and retries every minute up to 5 times, then falls back to the 6-hour cadence.
+  - A source with no local channels is always fetched at the minimum interval, and conditional headers (`If-None-Match` / `If-Modified-Since`) are only sent when channels already exist, so a `304 Not Modified` can never leave the channel list empty.
+  - Downloads prefer IPv4 (IPv6 CDN routes can be too slow for playlists over 1 MB) and fall back to IPv6 when IPv4 is unavailable.
+  - Every failed sync is logged with its error code and concrete reason (`source_id`, `name`, `url`, `error_code`, `reason`, `will_retry`).
+
 ### Settings and personalization
 
 - Interface language: English, 简体中文, 繁體中文; the first launch follows the system locale.
@@ -187,6 +202,7 @@ npm --prefix frontend run build   # vue-tsc + production frontend build
 - All UI text, validation errors, download errors and HTTP error messages are resolved by the backend i18n service.
 - Locale files: `resources/locales/active.en.json`, `active.zh-CN.json`, `active.zh-TW.json`.
 - Player strings live in the `art.player` group and are passed to ArtPlayer as a language map.
+- TV page strings (status, empty states, errors) live in the `tv.*` group.
 
 ### Update checking
 
@@ -208,16 +224,17 @@ bing_play/
 │   ├── dhtcrawler/                # DHT crawler service and resource persistence
 │   ├── torrentmgr/                # Torrent engine, job state machine, download scheduling
 │   ├── transcode/                 # Probe, conversion decision, FFmpeg job scheduler
-│   ├── server/                    # Local HTTP server and video/stream handlers
-│   ├── service/                   # Wails-bound business services (torrent/video/resource/settings/i18n)
+│   ├── tv/                        # IPTV source sync, M3U parser, channel snapshot, IPv4-preferring HTTP client
+│   ├── server/                    # Local HTTP server, video/stream and TV proxy handlers
+│   ├── service/                   # Wails-bound business services (torrent/video/resource/tv/settings/i18n)
 │   ├── i18n/                      # go-i18n bundle, locale detection
 │   ├── settings/                  # Setting keys and grouping
 │   ├── filetype/                  # Video type detection (extension + MIME)
 │   ├── logger/                    # slog + lumberjack setup (dev / prod)
 │   ├── container/                 # Shared helpers
-│   └── utils/                     # Paths, updater, IP helpers
+│   └── utils/                     # Paths, updater, IP helpers; IPTV probe CLI in utils/main
 ├── frontend/
-│   ├── src/views/                 # Play, Download, Resources, Settings, Layout, Find*, Library*
+│   ├── src/views/                 # Play, Download, Resources, TV, Settings, Layout, Find*, Library*
 │   ├── src/components/            # ArtPlayer wrapper, BrandIcon
 │   ├── src/i18n/                  # Locale loading from backend
 │   ├── src/settings/              # Settings store, theme/accent application
@@ -242,6 +259,11 @@ bing_play/
 2. **Discover and download torrents** — the crawler runs in the background. Open Resources, search or sort the list, select one or more rows, then click Download. Progress appears in Download.
 3. **Stream while downloading** — start a torrent download, open the Play page and select the corresponding file. The app serves byte ranges from the torrent and prioritizes the pieces needed for playback.
 4. **Change the download folder** — Settings → Download directory. The change applies to tasks created afterwards; existing tasks keep their original target.
+5. **Watch live TV** — open the TV page and wait for the background sync (the status line shows the last sync time and any error). Expand a group or search for a channel, then click it. If the source blocks direct playback, the app switches to the local proxy automatically.
+
+### Developer utilities
+
+- Probe the built-in IPTV collection from the command line over a direct connection (system proxy disabled): `go run ./internal/utils/main`. Use `-url` to test another subscription, `-max` / `-interval` to control attempts, and `-timeout` for the per-request timeout.
 
 ### Settings reference
 
@@ -254,11 +276,11 @@ bing_play/
 | `ui.theme_mode` | interface | `dark` | `dark` / `light` |
 | `ui.accent_color` | interface | `#3b82f6` | `#RRGGBB` |
 | `ui.resource_page_size` | hidden | `100` | Saved in-place on the Resources page (`50/100/200`) |
-| `ui.sidebar_width` | hidden | `260` | Saved in-place when resizing the playlist (`200–360`) |
+| `ui.sidebar_width` | hidden | `260` | Saved in-place when resizing the playlist or the TV channel panel (`200–360`) |
 
 ### Local HTTP endpoints
 
-The HTTP server binds to `127.0.0.1:9090` and is used for media delivery only:
+The HTTP server binds to `127.0.0.1:9090` and is used for media delivery and IPTV proxying:
 
 | Method & path | Purpose |
 |---|---|
@@ -269,6 +291,7 @@ The HTTP server binds to `127.0.0.1:9090` and is used for media delivery only:
 | `GET /video/{id}` | Stream a resource (local file or torrent, with range support and piece priority) |
 | `GET /video/local/{id}` | Reserved for local media; currently a development stub with a hard-coded test path and not used by the UI |
 | `GET /stream/{id}` | Legacy stream entry point |
+| `GET /tv/proxy?src=` | Proxy IPTV playlists/segments, rewrite URIs to the proxy and forward `User-Agent` / `Referer` |
 
 ### Data locations
 
@@ -277,7 +300,7 @@ The HTTP server binds to `127.0.0.1:9090` and is used for media delivery only:
 | Development (`!prod`) | `./data` | `./data/db/bt.db` | `./data/downloads` |
 | Production (`prod`) | `os.UserConfigDir()/bing-play` (e.g. `%AppData%\bing-play`, `~/.config/bing-play`, `~/Library/Application Support/bing-play`) | `<data dir>/db/bt.db` | `<data dir>/downloads` |
 
-Logs rotate via lumberjack under the data directory. Crawler node snapshots and runtime crawl data live in `resources/crawler/`.
+Logs rotate via lumberjack under the data directory. Crawler node snapshots and runtime crawl data live in `resources/crawler/`. IPTV sources and channels are stored in the same SQLite database (`tv_sources` / `tv_channels`).
 
 ## Deployment
 
