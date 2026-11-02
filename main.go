@@ -2,7 +2,9 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"github.com/bing/bing-play/app"
+	"github.com/bing/bing-play/internal/logger"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -30,12 +32,15 @@ func init() {
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
 func main() {
-	// 全局捕获panic，写入日志文件
+	// 全局捕获panic，优先写入受管理的 error.log
 	defer func() {
 		if r := recover(); r != nil {
-			// 日志输出到exe同目录 app.log
-			logPath, _ := filepath.Abs("app.log")
-			_ = os.WriteFile(logPath, debug.Stack(), 0644)
+			stack := debug.Stack()
+			// 日志尚未初始化或写盘失败时，保留旧的 exe 同目录兜底文件
+			if logErr := logger.RecordPanic(fmt.Sprint(r), stack); logErr != nil {
+				logPath, _ := filepath.Abs("app.log")
+				_ = os.WriteFile(logPath, stack, 0644)
+			}
 			// 重新panic，让程序退出
 			panic(r)
 		}

@@ -288,14 +288,17 @@ func (job *TorrentJob) monitorProgress() bool {
 
 	job.push(job.ToVO())
 
-	logger.Torrent.Debug(fmt.Sprintf(
-		infoHash+"进度: %.2f%% | 已完成: %.2f MB | 下载速度: %.2f MB/s | 上传速度: %.2f MB/s | Peer: %d\n",
-		progress,
-		float64(completed)/1024/1024,
-		float64(speed)/1024/1024,
-		float64(upload)/1024/1024,
-		peers,
-	))
+	// 默认不输出进度明细；排查下载问题时把 1 != 1 改成 1 == 1 即可开启。
+	if 1 != 1 {
+		logger.Torrent.Debug(fmt.Sprintf(
+			infoHash+"进度: %.2f%% | 已完成: %.2f MB | 下载速度: %.2f MB/s | 上传速度: %.2f MB/s | Peer: %d\n",
+			progress,
+			float64(completed)/1024/1024,
+			float64(speed)/1024/1024,
+			float64(upload)/1024/1024,
+			peers,
+		))
+	}
 
 	return stalled
 }

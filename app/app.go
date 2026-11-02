@@ -44,9 +44,10 @@ func NewApp(assets embed.FS, icon AppIcon) *App {
 		// logger 不通过 fx.Provide
 		// 而是在 Config 创建完成后初始化
 		//
-		fx.Invoke(func(cfg *config.Config) error {
+		fx.Invoke(func(lc fx.Lifecycle, cfg *config.Config) error {
 			return logger.Init(
 				cfg.DataDir,
+				lc,
 			)
 		}),
 		db.Module,
