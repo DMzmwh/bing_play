@@ -161,8 +161,8 @@ const keyword = ref('')
 const currentChannel = ref<ChannelItem | null>(null)
 /** 播放错误提示 */
 const errorMsg = ref('')
-/** 展开的分组，默认全部收起，避免频道过多时列表过长 */
-const expandedGroups = ref<Set<string>>(new Set())
+/** 当前展开的分组，同一时间只展开一个，避免频道过多时创建过多 DOM */
+const expandedGroup = ref<string | null>(null)
 
 const message = useMessage()
 
@@ -272,30 +272,19 @@ function tryProxyFallback(failedUrl: string): boolean {
 
 /** 频道分组是否展开 */
 function isGroupExpanded(title: string) {
-    return searching.value || expandedGroups.value.has(title)
+    return searching.value || expandedGroup.value === title
 }
 
+/** 展开指定分组，同时收起其他分组 */
 function toggleGroup(title: string) {
-    const next = new Set(expandedGroups.value)
-    if (next.has(title)) {
-        next.delete(title)
-    } else {
-        next.add(title)
-    }
-    expandedGroups.value = next
+    expandedGroup.value = expandedGroup.value === title ? null : title
 }
 
-/** 播放指定频道；当前分组自动展开 */
+/** 播放指定频道；自动展开该频道所在分组，并收起其他分组 */
 function playChannel(channel: ChannelItem) {
     errorMsg.value = ''
     currentChannel.value = channel
-
-    const title = channel.groupTitle || t('tv.group_unknown')
-    if (!expandedGroups.value.has(title)) {
-        const next = new Set(expandedGroups.value)
-        next.add(title)
-        expandedGroups.value = next
-    }
+    expandedGroup.value = channel.groupTitle || t('tv.group_unknown')
 }
 
 /** 当前频道在可见列表中的位置，供播放器「上一个/下一个」频道使用 */
