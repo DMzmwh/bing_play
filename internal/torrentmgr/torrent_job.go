@@ -433,10 +433,10 @@ func (job *TorrentJob) Pause() error {
 	return nil
 }
 
-// Cancel 取消任务：标记取消、终止 goroutine 并释放 Torrent。
-func (job *TorrentJob) Cancel() error {
-	_, err := job.apply(models.EvCancel, models.EventPayload{Now: time.Now()})
-	return err
+// Cancel 取消任务：恢复到未下载、终止 goroutine 并释放 Torrent。
+// 返回流转结果，调用方据此区分真正的取消与幂等操作。
+func (job *TorrentJob) Cancel() (models.Result, error) {
+	return job.apply(models.EvCancel, models.EventPayload{Now: time.Now()})
 }
 
 // shutdown 应用退出时终止任务 goroutine，不做状态落库。

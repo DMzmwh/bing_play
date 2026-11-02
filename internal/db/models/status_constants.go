@@ -58,7 +58,8 @@ const (
 	TaskRetryWait
 	// TaskFailed 失败，可手动重试。
 	TaskFailed
-	// TaskCancelled 用户取消，可重新下载。
+	// TaskCancelled 用户取消（历史状态）。
+	// 新流程取消后直接回到 TaskDiscovered，该状态仅用于兼容旧数据。
 	TaskCancelled
 )
 
@@ -90,11 +91,11 @@ func (s TaskState) Active() bool {
 
 // pendingMask 待下载列表状态位图：用户触发过下载、且尚未完成的任务。
 //
-// Cancelled 也包含在内：用户取消只改变任务状态，任务记录仍保留在列表中，
-// 只有用户手动删除记录才会从待下载列表移除。
+// Cancelled 不在其中：取消会把任务恢复到 TaskDiscovered（等同从未下载），
+// 因此取消的任务不会留在下载列表中。Cancelled 仅用于兼容历史数据。
 const pendingMask uint32 = 1<<uint(TaskPreparing) | 1<<uint(TaskQueued) |
 	1<<uint(TaskDownloading) | 1<<uint(TaskPaused) | 1<<uint(TaskVerifying) |
-	1<<uint(TaskRetryWait) | 1<<uint(TaskFailed) | 1<<uint(TaskCancelled)
+	1<<uint(TaskRetryWait) | 1<<uint(TaskFailed)
 
 // Pending 判断任务是否应保留在下载页「待下载」列表，O(1)。
 //
@@ -272,9 +273,10 @@ const (
 	EvDeleteLocal
 	EvImportLocal
 	EvPriorityChanged
+	EvRemovePlaylist
 )
 
-const eventCount = 26
+const eventCount = 27
 
 var eventNames = [eventCount]string{
 	"crawl_discover", "add_download", "attach_ok", "meta_ready", "meta_timeout",
@@ -282,7 +284,7 @@ var eventNames = [eventCount]string{
 	"stalled", "download_fatal", "download_complete", "verify_ok", "verify_missing",
 	"verify_corrupted", "pause", "resume", "cancel", "manual_retry",
 	"redownload", "repair", "file_lost", "delete_local", "import_local",
-	"priority_changed",
+	"priority_changed", "remove_playlist",
 }
 
 func (e Event) String() string {
@@ -402,7 +404,15 @@ func init() {
 	ps := []TaskState{TaskPreparing, TaskQueued, TaskDownloading, TaskRetryWait}
 	for _, from := range ps {
 		setRule(EvPause, from, TaskPaused, LocalKeep, GuardNone, pe|EffectStopContext)
-		setRule(EvCancel, from, TaskCancelled, LocalKeep, GuardNone, pe|EffectStopContext|EffectDropTorrent)
+	}
+	// 取消即恢复到「未下载」：任务记录回到 Discovered，列表与状态不留下下载痕迹。
+	// Paused / Failed / Cancelled 同样允许取消，Cancelled 用于兼容历史数据。
+	cs := []TaskState{
+		TaskPreparing, TaskQueued, TaskDownloading, TaskPaused,
+		TaskRetryWait, TaskFailed, TaskCancelled,
+	}
+	for _, from := range cs {
+		setRule(EvCancel, from, TaskDiscovered, LocalNone, GuardNone, pe|EffectStopContext|EffectDropTorrent)
 	}
 	setAltRule(EvResume, TaskPaused, TaskQueued, TaskPreparing, LocalKeep, GuardMetadata, pe)
 
@@ -414,6 +424,12 @@ func init() {
 	setRule(EvDeleteLocal, TaskCompleted, TaskCompleted, LocalMissing, GuardDelete, pe)
 	setRule(EvDeleteLocal, TaskFailed, TaskFailed, LocalMissing, GuardDelete, pe)
 	setRule(EvDeleteLocal, TaskCancelled, TaskCancelled, LocalMissing, GuardDelete, pe)
+
+	// 从播放列表移除种子资源：恢复到「未下载」，磁盘上的文件保留。
+	// 播放列表可能包含下载中、校验中或已完成的资源，均允许移除。
+	for _, from := range []TaskState{TaskDownloading, TaskVerifying, TaskCompleted} {
+		setRule(EvRemovePlaylist, from, TaskDiscovered, LocalNone, GuardNone, pe|EffectStopContext|EffectDropTorrent)
+	}
 }
 
 // CanTransit 查询规则表，O(1)。
@@ -608,7 +624,8 @@ func Transition(kind Kind, from TaskState, local LocalState, attempt, maxAttempt
 		if from == TaskVerifying {
 			return Result{}, ErrCancelTooLate
 		}
-		if from == TaskCompleted || from == TaskCancelled {
+		// 已完成与未下载状态取消为幂等操作，不改变任何状态。
+		if from == TaskCompleted || from == TaskDiscovered {
 			return Result{Task: from, Local: local}, nil
 		}
 	}
@@ -693,6 +710,20 @@ func (r *Resource) ApplyEvent(e Event, p EventPayload) (Result, error) {
 		r.Attempt = 0
 		r.ErrorCode = ""
 		r.NextRetryAt = nil
+	case EvCancel, EvRemovePlaylist:
+		// 取消 / 从播放列表移除等同从未下载：清除下载意图、进度与本地文件关联，
+		// 资源记录本身保留；磁盘上的文件由调用方决定是否删除。
+		r.Attempt = 0
+		r.ErrorCode = ""
+		r.NextRetryAt = nil
+		r.VerifiedAt = nil
+		r.LocalCheckedAt = nil
+		r.LocalLossReason = LossNone
+		r.FileName = nil
+		r.FileSize = nil
+		r.DownloadedSize = nil
+		r.MimeType = nil
+		r.LocalPath = ""
 	case EvMetaReady:
 		// 元数据就绪只说明这一步成功，不代表任务已恢复正常；
 		// 连续失败次数继续累计，否则每次重试都会被清零，永远到不了上限。

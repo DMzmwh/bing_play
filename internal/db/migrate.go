@@ -2,10 +2,15 @@ package db
 
 import (
 	"database/sql"
+	"os"
+	"path/filepath"
+
+	"github.com/bing/bing-play/internal/db/models"
 
 	"github.com/golang-migrate/migrate/v4"
 	sqliteMigrate "github.com/golang-migrate/migrate/v4/database/sqlite"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"gorm.io/gorm"
 )
 
 // RunMigrate 执行数据库迁移。
@@ -25,6 +30,49 @@ func RunMigrate(db *sql.DB) error {
 	err = m.Up()
 	if err != nil && err != migrate.ErrNoChange {
 		return err
+	}
+
+	return nil
+}
+
+// NormalizeLocalResourcePaths 把历史本地视频记录的 local_path 统一为文件所在目录。
+//
+// 旧实现把完整文件路径写入 local_path，与种子记录（下载目录）语义不一致。
+// 旧记录的 file_name 恰好是 local_path 的最后一段，据此可安全地改为父目录。
+// 该操作幂等，可重复执行。
+func NormalizeLocalResourcePaths(db *gorm.DB) error {
+	var list []models.Resource
+	err := db.
+		Select("id, local_path, file_name").
+		Where("kind = ? AND local_path <> ''", int8(models.KindLocal)).
+		Find(&list).
+		Error
+	if err != nil {
+		return err
+	}
+
+	for i := range list {
+		resource := &list[i]
+		if resource.FileName == nil || *resource.FileName == "" {
+			continue
+		}
+		// local_path 已经是目录时无需处理，规则天然幂等。
+		if info, statErr := os.Stat(resource.LocalPath); statErr == nil && info.IsDir() {
+			continue
+		}
+		if filepath.Base(resource.LocalPath) != *resource.FileName {
+			continue
+		}
+		dir := filepath.Dir(resource.LocalPath)
+		if dir == resource.LocalPath {
+			continue
+		}
+		if err := db.Model(&models.Resource{}).
+			Where("id = ?", resource.ID).
+			Update("local_path", dir).
+			Error; err != nil {
+			return err
+		}
 	}
 
 	return nil

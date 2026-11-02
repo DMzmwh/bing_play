@@ -74,7 +74,7 @@
 
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NPopconfirm, NProgress, NTag, useMessage } from 'naive-ui'
+import { NButton, NProgress, NTag, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { Events } from '@wailsio/runtime'
 import { t } from '@/i18n'
@@ -84,7 +84,6 @@ import {
     ListCompleted,
     OpenDownloadDir,
     Pause,
-    Repair,
     Resume,
     Retry,
     SetPriority
@@ -247,7 +246,14 @@ function upsert(payload: TorrentJobVO | null | undefined) {
         return
     }
 
-    // 已完成任务重新进入下载流程（如修复文件丢失）时，从已完成列表移除
+    // 取消后任务回到「未下载」（discovered），立即从下载列表移除
+    if (payload.taskState === 'discovered') {
+        const index = activeJobs.value.findIndex((job) => job.infoHash === payload.infoHash)
+        if (index >= 0) activeJobs.value.splice(index, 1)
+        return
+    }
+
+    // 已完成任务重新进入下载流程（如本地文件被删除后重新下载）时，从已完成列表移除
     const completedIndex = completedJobs.value.findIndex(
         (job) => job.infoHash === payload.infoHash
     )
@@ -397,11 +403,6 @@ function canRetry(job: TorrentJobVO): boolean {
     return job.taskState === 'failed' || job.taskState === 'cancelled'
 }
 
-/** 是否可修复：已完成但本地文件丢失 */
-function canRepair(job: TorrentJobVO): boolean {
-    return job.taskState === 'completed' && job.displayState === 'file_lost'
-}
-
 function rowKey(row: TorrentJobVO) {
     return row.infoHash
 }
@@ -525,16 +526,10 @@ const activeColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
                 canRetry(row)
                     ? textButton(t('download.action.retry'), () => void runAction(() => Retry(row.infoHash)))
                     : null,
-                h(
-                    NPopconfirm,
-                    {
-                        onPositiveClick: () => runAction(() => Cancel(row.infoHash))
-                    },
-                    {
-                        trigger: () =>
-                            textButton(t('download.action.cancel'), () => {}, 'error'),
-                        default: () => t('download.cancel_confirm')
-                    }
+                textButton(
+                    t('download.action.cancel'),
+                    () => void runAction(() => Cancel(row.infoHash)),
+                    'error'
                 )
             ])
     }
@@ -570,12 +565,7 @@ const completedColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
             h('div', { class: 'actions' }, [
                 textButton(t('download.action.open_dir'), () =>
                     void runAction(() => OpenDownloadDir(row.infoHash))
-                ),
-                canRepair(row)
-                    ? textButton(t('download.action.repair'), () =>
-                          void runAction(() => Repair(row.infoHash))
-                      )
-                    : null
+                )
             ])
     }
 ])

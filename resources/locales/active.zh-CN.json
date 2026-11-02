@@ -50,6 +50,83 @@
     "description": "顶部导航 - 系统设置",
     "other": "设置"
   },
+  "nav.tv": {
+    "description": "顶部导航 - 电视直播",
+    "other": "电视直播"
+  },
+
+  "tv.title": {
+    "description": "电视直播 - 左侧频道列表标题",
+    "other": "电视列表"
+  },
+  "tv.search_placeholder": {
+    "description": "电视直播 - 搜索频道输入框占位",
+    "other": "搜索频道"
+  },
+  "tv.sync_last": {
+    "description": "电视直播 - 上次同步时间，参数 Time",
+    "other": "上次更新：{{.Time}}"
+  },
+  "tv.sync_never": {
+    "description": "电视直播 - 尚未同步",
+    "other": "尚未同步"
+  },
+  "tv.empty_title": {
+    "description": "电视直播 - 还没有频道数据",
+    "other": "还没有频道数据"
+  },
+  "tv.empty_hint": {
+    "description": "电视直播 - 无频道时的提示",
+    "other": "订阅源同步完成后，频道会自动出现在这里"
+  },
+  "tv.select_channel": {
+    "description": "电视直播 - 未选择频道时的提示",
+    "other": "从左侧选择频道开始播放"
+  },
+  "tv.play_failed": {
+    "description": "电视直播 - 频道播放失败",
+    "other": "频道播放失败"
+  },
+  "tv.unsupported": {
+    "description": "电视直播 - 当前环境不支持 HLS",
+    "other": "当前环境不支持 HLS 播放"
+  },
+  "tv.proxy_fallback": {
+    "description": "电视直播 - 直连失败后自动切换代理播放",
+    "other": "直连失败，已切换代理播放"
+  },
+  "tv.prev_channel": {
+    "description": "电视直播 - 播放器上一个频道按钮提示",
+    "other": "上一个频道"
+  },
+  "tv.next_channel": {
+    "description": "电视直播 - 播放器下一个频道按钮提示",
+    "other": "下一个频道"
+  },
+  "tv.group_unknown": {
+    "description": "电视直播 - 未分组频道",
+    "other": "未分组"
+  },
+  "tv.error.fetch_failed": {
+    "description": "电视直播 - 订阅源请求失败",
+    "other": "订阅源请求失败"
+  },
+  "tv.error.status": {
+    "description": "电视直播 - 订阅源返回异常状态",
+    "other": "订阅源返回异常状态"
+  },
+  "tv.error.parse": {
+    "description": "电视直播 - 订阅源内容解析失败",
+    "other": "订阅源内容解析失败"
+  },
+  "tv.error.empty": {
+    "description": "电视直播 - 订阅源未包含频道",
+    "other": "订阅源未包含频道"
+  },
+  "tv.error.internal": {
+    "description": "电视直播 - 频道数据更新失败",
+    "other": "频道数据更新失败"
+  },
 
   "video.drop_tip": {
     "description": "播放区 - 拖入文件时提示松开",
@@ -58,6 +135,18 @@
   "video.play_failed": {
     "description": "播放区 - 播放器失败兜底提示",
     "other": "视频播放失败"
+  },
+  "video.play": {
+    "description": "播放列表右键菜单 - 播放",
+    "other": "播放"
+  },
+  "video.remove": {
+    "description": "播放列表右键菜单 - 删除",
+    "other": "删除"
+  },
+  "video.remove_failed": {
+    "description": "播放列表 - 删除失败",
+    "other": "移出播放列表失败"
   },
   "video.error_empty_path": {
     "description": "拖入视频 - 路径为空",
@@ -467,10 +556,6 @@
   "download.action.cancel": {
     "description": "下载中心 - 按钮：取消",
     "other": "取消任务"
-  },
-  "download.action.repair": {
-    "description": "下载中心 - 按钮：修复文件丢失",
-    "other": "修复"
   },
   "download.action.open_dir": {
     "description": "下载中心 - 按钮：打开下载目录",

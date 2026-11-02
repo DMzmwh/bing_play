@@ -19,6 +19,7 @@
                         v-if="group.videos.length > 1"
                         class="group-title"
                         @click="toggleGroup(group.title)"
+                        @contextmenu.prevent.stop="openContextMenu($event, { type: 'group', group })"
                     >
                         <n-icon
                             size="14"
@@ -36,6 +37,7 @@
                             class="episode"
                             :class="{ active: video.id === currentVideoId }"
                             @click="playVideo(video)"
+                            @contextmenu.prevent.stop="openContextMenu($event, { type: 'item', video })"
                         >
                             <span class="name">
                                 {{ video.fileName || video.resourceName }}
@@ -45,6 +47,18 @@
                 </div>
             </div>
         </div>
+
+        <!-- 列表右键菜单：播放 / 删除；manual 模式按鼠标坐标弹出 -->
+        <n-dropdown
+            trigger="manual"
+            placement="bottom-start"
+            :show="contextMenu.show"
+            :x="contextMenu.x"
+            :y="contextMenu.y"
+            :options="contextMenuOptions"
+            @select="handleContextMenuSelect"
+            @clickoutside="closeContextMenu"
+        />
 
         <!-- 拖动调整播放列表宽度，松开后自动保存 -->
         <div class="resize-handle" @mousedown="onResizeStart" />
@@ -123,7 +137,8 @@ import {
     settingNumber
 } from '@/settings'
 import {
-    ListPlaylist
+    ListPlaylist,
+    RemovePlaylistItems
 } from '../../bindings/github.com/bing/bing-play/internal/service/videoservice'
 import type {
     OpenVideoResult,
@@ -199,6 +214,68 @@ function isGroupExpanded(title: string) {
 /** 点击三角号切换分组展开状态 */
 function toggleGroup(title: string) {
     expandedGroupTitle.value = isGroupExpanded(title) ? null : title
+}
+
+/** 右键菜单的当前目标：单集或整个分组（目录） */
+interface ContextMenuTarget {
+    type: 'item' | 'group'
+    video?: PlaylistItem
+    group?: PlaylistGroup
+}
+
+/** 右键菜单位置与目标 */
+const contextMenu = ref<{
+    show: boolean
+    x: number
+    y: number
+    target: ContextMenuTarget | null
+}>({
+    show: false,
+    x: 0,
+    y: 0,
+    target: null
+})
+
+/** 右键菜单选项：播放、删除 */
+const contextMenuOptions = computed(() => [
+    { label: t('video.play'), key: 'play' },
+    { label: t('video.remove'), key: 'delete' }
+])
+
+/** 在鼠标位置打开右键菜单 */
+function openContextMenu(event: MouseEvent, target: ContextMenuTarget) {
+    contextMenu.value = {
+        show: true,
+        x: event.clientX,
+        y: event.clientY,
+        target
+    }
+}
+
+/** 关闭右键菜单 */
+function closeContextMenu() {
+    contextMenu.value = { ...contextMenu.value, show: false, target: null }
+}
+
+/** 处理右键菜单操作；分组播放表示播放该组第一集 */
+function handleContextMenuSelect(key: string | number) {
+    const target = contextMenu.value.target
+    closeContextMenu()
+    if (!target) return
+
+    if (key === 'play') {
+        const video = target.type === 'group' ? target.group?.videos[0] : target.video
+        if (video) playVideo(video)
+        return
+    }
+
+    if (key === 'delete') {
+        if (target.type === 'group' && target.group) {
+            removeGroup(target.group)
+        } else if (target.video) {
+            removeItem(target.video)
+        }
+    }
 }
 
 /** 播放中的视频所在分组，没有播放时返回 null */
@@ -358,6 +435,37 @@ function selectVideo(video: PlaylistItem) {
 /** 点击播放列表项切换当前视频 */
 function playVideo(video: PlaylistItem) {
     selectVideo(video)
+}
+
+/** 从播放列表移除若干条目：本地视频删除记录，种子资源重置为未下载，均不删除磁盘文件 */
+async function removePlaylistItems(items: PlaylistItem[]) {
+    if (!items.length) return
+
+    try {
+        await RemovePlaylistItems(items.map((item) => item.id))
+    } catch (error) {
+        console.error('移除播放列表条目失败:', error)
+        message.error(t('video.remove_failed'))
+        // 部分条目可能已移除，重新拉取保证列表与数据库一致
+        void fetchPlaylist()
+        return
+    }
+
+    const removedIds = new Set(items.map((item) => item.id))
+    playlist.value = playlist.value.filter((video) => !removedIds.has(video.id))
+    if (currentVideoId.value !== null && removedIds.has(currentVideoId.value)) {
+        currentVideoId.value = null
+    }
+}
+
+/** 删除单集 */
+function removeItem(video: PlaylistItem) {
+    void removePlaylistItems([video])
+}
+
+/** 删除整个分组（目录） */
+function removeGroup(group: PlaylistGroup) {
+    void removePlaylistItems(group.videos)
 }
 
 // 切换视频时重新准备：清空旧地址，并让上一次的请求与轮询失效
@@ -616,6 +724,8 @@ async function syncWindowMaximise(state: boolean) {
 }
 
 .group-name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -623,6 +733,8 @@ async function syncWindowMaximise(state: boolean) {
 
 .episode {
     display: flex;
+    align-items: center;
+    gap: 6px;
     justify-content: space-between;
     padding: 6px;
     font-size: 12px;

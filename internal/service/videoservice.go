@@ -13,6 +13,7 @@ import (
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
 	"github.com/bing/bing-play/internal/filetype"
+	"github.com/bing/bing-play/internal/torrentmgr"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -36,13 +37,18 @@ var (
 // 不负责：
 //  1. 视频流输出，仍由 HTTP 服务 /video/{id} 提供（浏览器只能通过 HTTP 拉流）
 type VideoService struct {
-	resourceDao *dao.ResourceDAO
+	resourceDao    *dao.ResourceDAO
+	torrentManager *torrentmgr.TorrentManager
 }
 
 // NewVideoService 创建 VideoService
-func NewVideoService(resourceDao *dao.ResourceDAO) *VideoService {
+func NewVideoService(
+	resourceDao *dao.ResourceDAO,
+	torrentManager *torrentmgr.TorrentManager,
+) *VideoService {
 	return &VideoService{
-		resourceDao: resourceDao,
+		resourceDao:    resourceDao,
+		torrentManager: torrentManager,
 	}
 }
 
@@ -148,6 +154,14 @@ func (s *VideoService) ListPlaylist() ([]PlaylistItem, error) {
 	return items, nil
 }
 
+// RemovePlaylistItems 从播放列表批量移除资源。
+//
+// 本地拖入的视频只删除数据库记录，不删除磁盘文件；
+// 种子资源重置为「未下载」，同样保留磁盘文件。单个失败不会中断其余条目。
+func (s *VideoService) RemovePlaylistItems(ids []int64) error {
+	return s.torrentManager.RemoveFromPlaylist(ids)
+}
+
 // NewVideoWailsService 把本地视频服务暴露给前端，播放列表通过 Wails binding 获取。
 func NewVideoWailsService(s *VideoService) ServiceOut {
 	return ServiceOut{
@@ -174,23 +188,37 @@ func (s *VideoService) OpenLocalVideo(path string) (*OpenVideoResult, error) {
 		return nil, ErrVideoUnsupported
 	}
 
-	resource, err := s.resourceDao.GetByLocalPath(path)
+	fileName := filepath.Base(path)
+	fileSize := info.Size()
+	mimeType := mime.TypeByExtension(filepath.Ext(path))
+	fileDir := filepath.Dir(path)
+
+	// local_path 统一保存文件所在目录：本地视频与已下载种子共用同一套匹配规则，
+	// 再次移入已下载的视频时直接复用原记录，播放列表不会出现重复条目。
+	resource, err := s.resourceDao.FindByLocalFile(fileDir, fileName)
 	if err != nil {
 		slog.Error("查询本地资源失败", "path", path, "err", err)
 		return nil, ErrVideoOpenFailed
 	}
 
 	now := time.Now()
-	fileName := filepath.Base(path)
-	fileSize := info.Size()
-	mimeType := mime.TypeByExtension(filepath.Ext(path))
+
+	// 命中已下载种子记录时直接复用，不改变其类型与下载状态，避免干扰做种/续传。
+	if resource != nil && resource.Kind == models.KindTorrent {
+		return &OpenVideoResult{
+			ID:       resource.ID,
+			FileName: fileName,
+			FileSize: fileSize,
+			MimeType: mimeType,
+		}, nil
+	}
 
 	if resource == nil {
 		resource = &models.Resource{
-			LocalPath:  path,
 			CreateTime: &now,
 		}
 	}
+	resource.LocalPath = fileDir
 
 	// 本地视频没有种子名称，从文件名中取出剧名作为播放列表分组名，
 	// 去掉集数部分，让同一部剧的不同集聚到一组。

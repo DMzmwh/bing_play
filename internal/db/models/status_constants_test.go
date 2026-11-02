@@ -71,6 +71,93 @@ func TestCancelTooLateInVerifying(t *testing.T) {
 	}
 }
 
+// TestCancelRestoresUndownloaded 取消后任务回到「未下载」，进度与本地文件关联全部清零。
+func TestCancelRestoresUndownloaded(t *testing.T) {
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	localPath := "downloads/movie"
+	fileName := "movie.mp4"
+	fileSize := int64(1024)
+	downloaded := int64(512)
+	mimeType := "video/mp4"
+	nextRetry := now.Add(time.Minute)
+
+	r := &Resource{
+		Kind:            KindTorrent,
+		TaskState:       TaskDownloading,
+		LocalState:      LocalPartial,
+		StateVersion:    3,
+		Attempt:         2,
+		ErrorCode:       "download.error.network",
+		NextRetryAt:     &nextRetry,
+		VerifiedAt:      &now,
+		LocalCheckedAt:  &now,
+		LocalLossReason: LossNotFound,
+		LocalPath:       localPath,
+		FileName:        &fileName,
+		FileSize:        &fileSize,
+		DownloadedSize:  &downloaded,
+		MimeType:        &mimeType,
+	}
+
+	res, err := r.ApplyEvent(EvCancel, EventPayload{Now: now})
+	if err != nil {
+		t.Fatalf("取消应允许: %v", err)
+	}
+	if res.Task != TaskDiscovered || res.Local != LocalNone {
+		t.Fatalf("取消后状态 = %v/%v, want discovered/none", res.Task, res.Local)
+	}
+	if r.StateVersion != 4 {
+		t.Fatalf("取消后版本 = %d, want 4", r.StateVersion)
+	}
+	if r.LocalPath != "" || r.FileName != nil || r.FileSize != nil ||
+		r.DownloadedSize != nil || r.MimeType != nil || r.Attempt != 0 ||
+		r.ErrorCode != "" || r.NextRetryAt != nil || r.VerifiedAt != nil ||
+		r.LocalCheckedAt != nil || r.LocalLossReason != LossNone {
+		t.Fatalf("取消后仍残留下载痕迹: %+v", r)
+	}
+}
+
+// TestCancelFromUserStates Paused / Failed 也应允许取消并恢复到未下载。
+func TestCancelFromUserStates(t *testing.T) {
+	for _, from := range []TaskState{TaskPaused, TaskFailed} {
+		res, err := Transition(KindTorrent, from, LocalPartial, 0, 3, EvCancel, EventPayload{})
+		if err != nil || res.Task != TaskDiscovered || res.Local != LocalNone {
+			t.Fatalf("从 %v 取消失败: %+v err=%v", from, res, err)
+		}
+	}
+
+	res, err := Transition(KindTorrent, TaskDiscovered, LocalNone, 0, 3, EvCancel, EventPayload{})
+	if err != nil || res.VersionDelta != 0 {
+		t.Fatalf("重复取消应为幂等: %+v err=%v", res, err)
+	}
+}
+
+// TestRemovePlaylistRestoresUndownloaded 播放列表移除种子资源后回到「未下载」。
+func TestRemovePlaylistRestoresUndownloaded(t *testing.T) {
+	cases := []struct {
+		task  TaskState
+		local LocalState
+	}{
+		{TaskDownloading, LocalPartial},
+		{TaskVerifying, LocalPartial},
+		{TaskCompleted, LocalPresent},
+	}
+
+	for _, c := range cases {
+		res, err := Transition(KindTorrent, c.task, c.local, 0, 3, EvRemovePlaylist, EventPayload{})
+		if err != nil {
+			t.Fatalf("从 %v/%v 移除播放列表应允许: %v", c.task, c.local, err)
+		}
+		if res.Task != TaskDiscovered || res.Local != LocalNone {
+			t.Fatalf("从 %v/%v 移除后状态 = %v/%v, want discovered/none",
+				c.task, c.local, res.Task, res.Local)
+		}
+		if res.VersionDelta != 1 {
+			t.Fatalf("从 %v/%v 移除后版本增量 = %d, want 1", c.task, c.local, res.VersionDelta)
+		}
+	}
+}
+
 func TestRetryGate(t *testing.T) {
 	maxAttempts := uint16(3)
 
@@ -190,11 +277,11 @@ func TestDisplayMatrixCoversValidPairs(t *testing.T) {
 }
 
 // TestPendingKeepsUnfinishedTasks 待下载列表必须保留所有用户触发过、
-// 且尚未完成的任务状态，只有已完成与仅爬虫发现的记录才被排除。
+// 且尚未完成的任务状态，只有已完成、仅爬虫发现与已取消的记录才被排除。
 func TestPendingKeepsUnfinishedTasks(t *testing.T) {
 	pending := []TaskState{
 		TaskPreparing, TaskQueued, TaskDownloading, TaskPaused,
-		TaskVerifying, TaskRetryWait, TaskFailed, TaskCancelled,
+		TaskVerifying, TaskRetryWait, TaskFailed,
 	}
 	for _, state := range pending {
 		if !state.Pending() {
@@ -202,7 +289,7 @@ func TestPendingKeepsUnfinishedTasks(t *testing.T) {
 		}
 	}
 
-	for _, state := range []TaskState{TaskDiscovered, TaskCompleted} {
+	for _, state := range []TaskState{TaskDiscovered, TaskCompleted, TaskCancelled} {
 		if state.Pending() {
 			t.Fatalf("状态 %v 不应出现在待下载列表", state)
 		}

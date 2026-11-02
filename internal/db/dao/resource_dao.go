@@ -2,6 +2,8 @@ package dao
 
 import (
 	"errors"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -135,9 +137,10 @@ func taskStatesWhere(keep func(models.TaskState) bool) []models.TaskState {
 
 // pendingTaskStates 下载页「待下载」列表状态：用户触发过下载且未完成的任务。
 // 数据库是该集合的唯一事实源，异常中断的任务不会被自动移出。
+// 取消的任务会恢复为 Discovered，因此不在该集合中。
 var pendingTaskStates = taskStatesWhere(models.TaskState.Pending)
 
-// downloadTaskStates 下载页需要展示的任务状态，Discovered（仅爬虫发现）与本地视频不在其中。
+// downloadTaskStates 下载页需要展示的任务状态，Discovered（爬虫发现 / 已取消）与本地视频不在其中。
 var downloadTaskStates = taskStatesWhere(func(state models.TaskState) bool {
 	return state.Pending() || state == models.TaskCompleted
 })
@@ -164,8 +167,9 @@ func (d *ResourceDAO) ListDownloadTasks() ([]models.Resource, error) {
 
 // ListPendingTasks 查询下载页「待下载」列表的全部任务。
 //
-// 包含所有用户已触发下载且尚未完成的状态（含 Failed / Cancelled），
+// 包含所有用户已触发下载且尚未完成的状态（含 Failed），
 // 作为待下载队列的持久化事实源：应用重启或异常中断后任务不会从列表丢失。
+// 已取消的任务会恢复为未下载状态，不在该列表中。
 func (d *ResourceDAO) ListPendingTasks() ([]models.Resource, error) {
 	return d.ListByTaskStates(pendingTaskStates)
 }
@@ -193,6 +197,47 @@ func (d *ResourceDAO) ListByTaskStates(states []models.TaskState) ([]models.Reso
 		Find(&list).
 		Error
 	return list, err
+}
+
+// DeleteByIDs 批量删除资源记录，不删除磁盘文件。
+// 仅用于用户拖入的本地视频，种子资源应重置为未下载状态。
+func (d *ResourceDAO) DeleteByIDs(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return d.db.Where("id IN ?", ids).Delete(&models.Resource{}).Error
+}
+
+// ResetToUndownloadedByIDs 批量把种子资源重置为「未下载」，清理下载进度与本地文件关联。
+// 磁盘上的文件不会删除，与状态机 EvRemovePlaylist 的清理规则保持一致。
+func (d *ResourceDAO) ResetToUndownloadedByIDs(ids []int64, now time.Time) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	updates := map[string]any{
+		"task_state":        models.TaskDiscovered,
+		"local_state":       models.LocalNone,
+		"local_loss_reason": models.LossNone,
+		"attempt":           0,
+		"error_code":        "",
+		"next_retry_at":     nil,
+		"verified_at":       nil,
+		"local_checked_at":  nil,
+		"file_name":         nil,
+		"file_size":         nil,
+		"downloaded_size":   nil,
+		"mime_type":         nil,
+		"local_path":        "",
+		"state_version":     gorm.Expr("state_version + 1"),
+		"state_changed_at":  now,
+		"update_time":       now,
+	}
+
+	return d.db.Model(&models.Resource{}).
+		Where("id IN ?", ids).
+		Where("task_state IN ?", []models.TaskState{models.TaskDownloading, models.TaskVerifying, models.TaskCompleted}).
+		Updates(updates).Error
 }
 
 // Get 根据ID查询
@@ -334,21 +379,66 @@ func (d *ResourceDAO) ListCrawled(q CrawledListQuery) ([]models.Resource, int64,
 	return list, total, nil
 }
 
-// GetByLocalPath 根据本地文件路径查询资源
-func (d *ResourceDAO) GetByLocalPath(path string) (*models.Resource, error) {
-
-	var r models.Resource
-
-	err := d.db.
-		Where("local_path = ?", path).
-		First(&r).
-		Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+// FindByLocalFile 按「文件所在目录 + 文件名」查询已登记的资源。
+//
+// local_path 统一保存文件所在目录，file_name 保存文件名（可带子目录），
+// 本地视频与种子记录语义一致，因此直接拼接完整路径比较即可。
+// 只匹配当前可播放的记录：本地视频，或已完成且本地齐全的种子。
+// 同一文件有多条记录时优先返回种子记录，复用下载状态机数据。
+// 未命中返回 nil, nil。
+func (d *ResourceDAO) FindByLocalFile(dir, fileName string) (*models.Resource, error) {
+	if dir == "" || fileName == "" {
 		return nil, nil
 	}
 
-	return &r, err
+	var list []models.Resource
+	err := d.db.
+		Where(
+			"(kind = ?) OR (kind = ? AND task_state = ? AND local_state = ?)",
+			int8(models.KindLocal),
+			int8(models.KindTorrent), int8(models.TaskCompleted), int8(models.LocalPresent),
+		).
+		Where("local_path <> ''").
+		Order("kind ASC, id ASC").
+		Find(&list).
+		Error
+	if err != nil {
+		return nil, err
+	}
+
+	target := normalizeLocalPath(filepath.Join(dir, fileName))
+	targetName := filepath.Base(target)
+	for i := range list {
+		resource := &list[i]
+		if resource.FileName == nil || !sameFileName(filepath.Base(*resource.FileName), targetName) {
+			continue
+		}
+		if normalizeLocalPath(filepath.Join(resource.LocalPath, *resource.FileName)) == target {
+			return resource, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// normalizeLocalPath 把路径转为绝对路径并清理，Windows 下统一小写以便忽略大小写差异。
+func normalizeLocalPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		path = strings.ToLower(path)
+	}
+	return path
+}
+
+// sameFileName 比较两个文件名，Windows 下忽略大小写。
+func sameFileName(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 //

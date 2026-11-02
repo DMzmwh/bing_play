@@ -45,6 +45,9 @@ var Module = fx.Module(
 		NewSettingsService,
 		NewSettingsWailsService,
 
+		NewTVService,
+		NewTVWailsService,
+
 		NewI18nWailsService,
 	),
 )

@@ -378,29 +378,23 @@ func localPlayable(resource *models.Resource) bool {
 		(resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent)
 }
 
-// localFilePath 解析资源对应的本地文件；资源路径是目录时使用记录中的文件名。
+// localFilePath 解析资源对应的本地文件。
+// local_path 统一保存文件所在目录，file_name 保存文件名（可带子目录）。
 // 返回空 errKey 表示解析成功。
 func localFilePath(resource *models.Resource) (string, string, int) {
 	if resource.LocalPath == "" {
 		return "", "video.error_empty_path", http.StatusNotFound
 	}
 
-	info, err := os.Stat(resource.LocalPath)
-	if err != nil {
-		return "", "video.error_not_found", http.StatusNotFound
-	}
-	if !info.IsDir() {
-		return resource.LocalPath, "", 0
-	}
-
-	fileName := ""
-	if resource.FileName != nil {
-		fileName = *resource.FileName
-	}
-	if fileName == "" {
+	if resource.FileName == nil || *resource.FileName == "" {
 		return "", "video.error_file_required", http.StatusBadRequest
 	}
-	return filepath.Join(resource.LocalPath, fileName), "", 0
+
+	filePath := filepath.Join(resource.LocalPath, *resource.FileName)
+	if _, err := os.Stat(filePath); err != nil {
+		return "", "video.error_not_found", http.StatusNotFound
+	}
+	return filePath, "", 0
 }
 
 func videoURL(r *http.Request, id int64) string {
@@ -480,27 +474,25 @@ func (h *VideoHandler) videoLocal(
 	r *http.Request,
 	resource *models.Resource,
 ) {
-	filePath := resource.LocalPath
-	if filePath == "" {
+	if resource.LocalPath == "" {
 		http.Error(w, h.i18nService.T("video.error_empty_path", nil), http.StatusNotFound)
 		return
 	}
 
-	infoV, err := os.Stat(filePath)
-	if err != nil {
-		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+	fileName := r.URL.Query().Get("file")
+	if fileName == "" && resource.FileName != nil {
+		fileName = *resource.FileName
+	}
+	if fileName == "" {
+		http.Error(w, h.i18nService.T("video.error_file_required", nil), http.StatusBadRequest)
 		return
 	}
-	if infoV.IsDir() {
-		fileItemPath := r.URL.Query().Get("file")
-		if fileItemPath == "" && resource.FileName != nil {
-			fileItemPath = *resource.FileName
-		}
-		if fileItemPath == "" {
-			http.Error(w, h.i18nService.T("video.error_file_required", nil), http.StatusBadRequest)
-			return
-		}
-		filePath = filepath.Join(filePath, fileItemPath)
+
+	// local_path 统一保存文件所在目录，直接拼接文件名即可。
+	filePath := filepath.Join(resource.LocalPath, fileName)
+	if _, err := os.Stat(filePath); err != nil {
+		http.Error(w, h.i18nService.T("video.error_not_found", nil), http.StatusNotFound)
+		return
 	}
 
 	file, err := os.Open(filePath)
@@ -517,9 +509,6 @@ func (h *VideoHandler) videoLocal(
 	}
 
 	name := filepath.Base(filePath)
-	if resource.FileName != nil && *resource.FileName != "" {
-		name = *resource.FileName
-	}
 
 	// 让 Go 原生 HTTP Server 处理 Range / 206 / Content-Length / Seek
 	http.ServeContent(w, r, name, info.ModTime(), file)

@@ -380,3 +380,152 @@ func TestVOFromResource(t *testing.T) {
 		t.Fatalf("已完成任务展示态 = %q, want completed", donePayload.DisplayState)
 	}
 }
+
+// TestRemoveDownloadFiles 取消任务必须删除数据文件、元信息缓存与空目录，
+// 同时不能删除下载目录之外的文件。
+func TestRemoveDownloadFiles(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "downloads")
+	outsideDir := filepath.Join(root, "outside")
+
+	write := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatalf("写入文件失败: %v", err)
+		}
+	}
+	exists := func(path string) bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+
+	infoHash := "abcdef0123456789abcdef0123456789abcdef01"
+
+	// 单文件种子与元信息缓存。下载中的临时数据写在 .part，取消后必须一并删除。
+	single := filepath.Join(base, "single.mp4")
+	write(single)
+	write(single + torrentPartSuffix)
+	cache := metadataCachePath(base, infoHash)
+	write(cache)
+	removeDownloadFiles(base, infoHash, &metainfo.Info{Name: "single.mp4", Length: 1}, "")
+	if exists(single) || exists(single+torrentPartSuffix) {
+		t.Fatal("单文件种子的数据文件或 part 文件未删除")
+	}
+	if exists(cache) || exists(filepath.Join(base, metadataCacheDir)) {
+		t.Fatal("元信息缓存及空目录未删除")
+	}
+
+	// 多文件种子：文件位于 Info.Name 根目录下，删除后空子目录一并清理。
+	multiDir := filepath.Join(base, "Show")
+	multi := filepath.Join(multiDir, "ep01.mp4")
+	write(multi)
+	write(multi + torrentPartSuffix)
+	multiInfo := &metainfo.Info{
+		Name:  "Show",
+		Files: []metainfo.FileInfo{{Path: []string{"ep01.mp4"}, Length: 1}},
+	}
+	removeDownloadFiles(base, "", multiInfo, "")
+	if exists(multi) || exists(multi+torrentPartSuffix) || exists(multiDir) {
+		t.Fatal("多文件种子的数据文件、part 文件或空子目录未删除")
+	}
+
+	// 元信息缺失时回退到主文件名。
+	fallback := filepath.Join(base, "fallback.mp4")
+	write(fallback)
+	write(fallback + torrentPartSuffix)
+	removeDownloadFiles(base, "", nil, "fallback.mp4")
+	if exists(fallback) || exists(fallback+torrentPartSuffix) {
+		t.Fatal("回退主文件名的文件或 part 文件未删除")
+	}
+
+	// 种子中带 .. 的异常路径不能删除下载目录之外的文件。
+	keep := filepath.Join(outsideDir, "keep.mp4")
+	write(keep)
+	escapeInfo := &metainfo.Info{
+		Name:  "x",
+		Files: []metainfo.FileInfo{{Path: []string{"..", "..", "outside", "keep.mp4"}, Length: 1}},
+	}
+	removeDownloadFiles(base, "", escapeInfo, "")
+	if !exists(keep) {
+		t.Fatal("不应删除下载目录之外的文件")
+	}
+
+	if !pathWithin(base, filepath.Join(base, "a", "b")) {
+		t.Fatal("目录内的路径应判定为合法")
+	}
+	if pathWithin(base, filepath.Join(base, "..", "outside")) {
+		t.Fatal("目录外的路径不应判定为合法")
+	}
+}
+
+// TestLocalDataMissing 已完成任务的本地文件被删除或大小变化时必须判定为缺失，
+// 资源页再次点击下载时才会重新入队，而不是按「已完成」直接跳过。
+func TestLocalDataMissing(t *testing.T) {
+	base := t.TempDir()
+	info := metainfo.Info{
+		Name: "Show",
+		Files: []metainfo.FileInfo{
+			{Path: []string{"ep01.mp4"}, Length: 3},
+			{Path: []string{"sub", "ep02.mp4"}, Length: 3},
+		},
+	}
+	raw, err := bencode.Marshal(info)
+	if err != nil {
+		t.Fatalf("编码测试元信息失败: %v", err)
+	}
+	mi := &metainfo.MetaInfo{InfoBytes: raw}
+	infoHash := mi.HashInfoBytes().HexString()
+	if err := writeMetadataCache(base, infoHash, mi); err != nil {
+		t.Fatalf("写入元信息缓存失败: %v", err)
+	}
+
+	write := func(rel string, content string) {
+		t.Helper()
+		path := filepath.Join(base, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("创建目录失败: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("写入文件失败: %v", err)
+		}
+	}
+	write(filepath.Join("Show", "ep01.mp4"), "abc")
+	write(filepath.Join("Show", "sub", "ep02.mp4"), "abc")
+
+	resource := &models.Resource{InfoHash: infoHash, LocalPath: base}
+	if localDataMissing(resource) {
+		t.Fatal("文件齐全时不应判定为缺失")
+	}
+
+	// 删除其中一个文件：按元信息缓存枚举全部文件，能感知多文件种子的缺失。
+	if err := os.Remove(filepath.Join(base, "Show", "sub", "ep02.mp4")); err != nil {
+		t.Fatalf("删除测试文件失败: %v", err)
+	}
+	if !localDataMissing(resource) {
+		t.Fatal("文件被删除后应判定为缺失")
+	}
+
+	// 文件存在但大小与元信息不一致，同样需要重新下载。
+	write(filepath.Join("Show", "sub", "ep02.mp4"), "ab")
+	if !localDataMissing(resource) {
+		t.Fatal("文件大小不一致时应判定为缺失")
+	}
+
+	// 无元信息缓存时回退到主文件检查。
+	name := "missing.mp4"
+	fallback := &models.Resource{
+		InfoHash:  "ffffffffffffffffffffffffffffffffffffffff",
+		LocalPath: base,
+		FileName:  &name,
+	}
+	if !localDataMissing(fallback) {
+		t.Fatal("主文件不存在时应判定为缺失")
+	}
+	write(name, "abc")
+	if localDataMissing(fallback) {
+		t.Fatal("主文件存在时应视为完整")
+	}
+}

@@ -13,5 +13,6 @@ var Module = fx.Module(
 		InitDB,
 		dao.NewAppSettingDAO,
 		dao.NewResourceDAO,
+		dao.NewTvDAO,
 	),
 )

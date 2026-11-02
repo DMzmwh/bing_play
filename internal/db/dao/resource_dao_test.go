@@ -2,6 +2,7 @@ package dao
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -352,17 +353,19 @@ func TestListDownloadTasks(t *testing.T) {
 		t.Fatalf("写入本地视频失败: %v", err)
 	}
 
-	// 下载中、已完成、已取消三条任务应全部返回。
+	// 下载中、已完成两条任务会被返回；已取消的任务恢复为未下载，不应出现。
 	states := []models.TaskState{
 		models.TaskDownloading,
 		models.TaskCompleted,
-		models.TaskCancelled,
 	}
 	for i, state := range states {
 		hash := "hash-task-" + string(rune('a'+i))
 		if err := d.Save(mk(hash, state, i+1)); err != nil {
 			t.Fatalf("写入下载任务失败: %v", err)
 		}
+	}
+	if err := d.Save(mk("hash-cancelled", models.TaskCancelled, 3)); err != nil {
+		t.Fatalf("写入已取消任务失败: %v", err)
 	}
 
 	tasks, err := d.ListDownloadTasks()
@@ -396,7 +399,7 @@ func TestListDownloadTasks(t *testing.T) {
 }
 
 // TestListPendingTasks 待下载列表以数据库为事实源，必须包含所有未完成状态，
-// 排除仅爬虫发现的记录、已完成任务与本地视频。
+// 排除仅爬虫发现的记录、已完成任务、已取消任务与本地视频。
 func TestListPendingTasks(t *testing.T) {
 	d := newTestResourceDAO(t)
 
@@ -417,7 +420,7 @@ func TestListPendingTasks(t *testing.T) {
 	pendingStates := []models.TaskState{
 		models.TaskPreparing, models.TaskQueued, models.TaskDownloading,
 		models.TaskPaused, models.TaskVerifying, models.TaskRetryWait,
-		models.TaskFailed, models.TaskCancelled,
+		models.TaskFailed,
 	}
 	for i, state := range pendingStates {
 		if err := d.Save(mk("hash-pending-"+string(rune('a'+i)), state)); err != nil {
@@ -430,6 +433,10 @@ func TestListPendingTasks(t *testing.T) {
 	}
 	if err := d.Save(mk("hash-done", models.TaskCompleted)); err != nil {
 		t.Fatalf("写入已完成任务失败: %v", err)
+	}
+	// 已取消的任务会恢复为未下载，不应出现在待下载列表。
+	if err := d.Save(mk("hash-cancelled", models.TaskCancelled)); err != nil {
+		t.Fatalf("写入已取消任务失败: %v", err)
 	}
 	localName := "本地视频"
 	if err := d.SaveLocalResource(&models.Resource{
@@ -461,9 +468,188 @@ func TestListPendingTasks(t *testing.T) {
 			t.Fatalf("状态 %v 的任务未保留在待下载列表: %v", state, got)
 		}
 	}
-	for _, hash := range []string{"hash-raw", "hash-done"} {
+	for _, hash := range []string{"hash-raw", "hash-done", "hash-cancelled"} {
 		if _, ok := got[hash]; ok {
 			t.Fatalf("任务 %q 不应出现在待下载列表", hash)
 		}
+	}
+}
+
+// TestFindByLocalFile local_path 统一为「文件所在目录」，本地视频与种子记录
+// 使用同一套匹配规则；同一文件有多条记录时优先返回种子记录。
+func TestFindByLocalFile(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	filename := func(s string) *string { return &s }
+
+	downloadDir := t.TempDir()
+	otherDir := t.TempDir()
+
+	mk := func(hash string, kind models.Kind, dir, name string, task models.TaskState, local models.LocalState) *models.Resource {
+		return &models.Resource{
+			InfoHash:   hash,
+			FileName:   filename(name),
+			LocalPath:  dir,
+			Kind:       kind,
+			TaskState:  task,
+			LocalState: local,
+			CreateTime: &now,
+			UpdateTime: &now,
+		}
+	}
+
+	resources := []*models.Resource{
+		// 单文件种子：文件直接位于下载目录
+		mk("hash-root", models.KindTorrent, downloadDir, "Movie.mp4", models.TaskCompleted, models.LocalPresent),
+		// 多文件种子：file_name 保存相对路径
+		mk("hash-sub", models.KindTorrent, downloadDir, filepath.Join("Season 1", "episode.mkv"), models.TaskCompleted, models.LocalPresent),
+		// 本地视频：与种子记录使用同一种目录语义
+		mk("", models.KindLocal, downloadDir, "local.mp4", models.TaskCompleted, models.LocalPresent),
+		// 同一文件同时存在本地与种子记录：应优先复用种子记录
+		mk("hash-dup", models.KindTorrent, downloadDir, "dup.mp4", models.TaskCompleted, models.LocalPresent),
+		mk("", models.KindLocal, downloadDir, "dup.mp4", models.TaskCompleted, models.LocalPresent),
+		// 目录外的同名文件：不应误判
+		mk("hash-outside", models.KindTorrent, otherDir, "outside.mp4", models.TaskCompleted, models.LocalPresent),
+		// 已完成但文件丢失：不可复用
+		mk("hash-missing", models.KindTorrent, downloadDir, "missing.mp4", models.TaskCompleted, models.LocalMissing),
+	}
+	for _, resource := range resources {
+		var err error
+		if resource.Kind == models.KindLocal {
+			err = d.SaveLocalResource(resource)
+		} else {
+			err = d.Save(resource)
+		}
+		if err != nil {
+			t.Fatalf("写入资源 %q 失败: %v", *resource.FileName, err)
+		}
+	}
+
+	cases := []struct {
+		name     string
+		path     string
+		wantHash string
+		wantKind models.Kind
+	}{
+		{"下载目录内的单文件种子", filepath.Join(downloadDir, "Movie.mp4"), "hash-root", models.KindTorrent},
+		{"下载目录内的本地视频", filepath.Join(downloadDir, "local.mp4"), "", models.KindLocal},
+		{"子目录相对路径", filepath.Join(downloadDir, "Season 1", "episode.mkv"), "hash-sub", models.KindTorrent},
+		{"重复记录优先种子", filepath.Join(downloadDir, "dup.mp4"), "hash-dup", models.KindTorrent},
+		{"目录外同名文件", filepath.Join(t.TempDir(), "outside.mp4"), "", 0},
+		{"文件丢失的种子记录", filepath.Join(downloadDir, "missing.mp4"), "", 0},
+		{"未登记的文件", filepath.Join(downloadDir, "nothing.mp4"), "", 0},
+	}
+
+	for _, c := range cases {
+		got, err := d.FindByLocalFile(filepath.Dir(c.path), filepath.Base(c.path))
+		if err != nil {
+			t.Fatalf("%s: 查询失败: %v", c.name, err)
+		}
+		if c.wantHash == "" && c.wantKind == 0 {
+			if got != nil {
+				t.Errorf("%s: 不应匹配到记录 %d", c.name, got.ID)
+			}
+			continue
+		}
+		if got == nil || got.InfoHash != c.wantHash || got.Kind != c.wantKind {
+			t.Errorf("%s: 匹配结果 = %v, want hash %q kind %v", c.name, got, c.wantHash, c.wantKind)
+		}
+	}
+}
+
+// TestDeleteByIDsAndGetByIDs 本地视频从播放列表移除时只删除记录，不涉及磁盘文件。
+func TestDeleteByIDsAndGetByIDs(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	name := "本地视频"
+	file := "local.mp4"
+	resource := &models.Resource{
+		ResourceName: &name,
+		FileName:     &file,
+		LocalPath:    t.TempDir(),
+		Kind:         models.KindLocal,
+		TaskState:    models.TaskCompleted,
+		LocalState:   models.LocalPresent,
+		CreateTime:   &now,
+		UpdateTime:   &now,
+	}
+	if err := d.SaveLocalResource(resource); err != nil {
+		t.Fatalf("写入本地视频失败: %v", err)
+	}
+	if resource.ID == 0 {
+		t.Fatalf("写入后未生成主键")
+	}
+
+	rows, err := d.GetByIDs([]int64{resource.ID})
+	if err != nil {
+		t.Fatalf("按 ID 批量查询失败: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != resource.ID {
+		t.Fatalf("按 ID 批量查询结果 = %v", rows)
+	}
+
+	if err := d.DeleteByIDs([]int64{resource.ID}); err != nil {
+		t.Fatalf("批量删除记录失败: %v", err)
+	}
+
+	rows, err = d.GetByIDs([]int64{resource.ID})
+	if err != nil {
+		t.Fatalf("删除后查询失败: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("删除后仍能查询到记录: %v", rows)
+	}
+}
+
+// TestResetToUndownloadedByIDs 种子资源批量重置为未下载，磁盘文件字段被清理。
+func TestResetToUndownloadedByIDs(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	now := time.Now()
+	name := "测试剧集"
+	file := "ep1.mp4"
+	fileSize := int64(1024)
+	downloaded := int64(1024)
+	mimeType := "video/mp4"
+	resource := &models.Resource{
+		ResourceName:   &name,
+		FileName:       &file,
+		LocalPath:      t.TempDir(),
+		FileSize:       &fileSize,
+		DownloadedSize: &downloaded,
+		MimeType:       &mimeType,
+		InfoHash:       "reset-test-hash",
+		Kind:           models.KindTorrent,
+		TaskState:      models.TaskCompleted,
+		LocalState:     models.LocalPresent,
+		StateVersion:   3,
+		VerifiedAt:     &now,
+		LocalCheckedAt: &now,
+		CreateTime:     &now,
+		UpdateTime:     &now,
+	}
+	if err := d.Save(resource); err != nil {
+		t.Fatalf("写入种子资源失败: %v", err)
+	}
+
+	if err := d.ResetToUndownloadedByIDs([]int64{resource.ID}, now); err != nil {
+		t.Fatalf("批量重置失败: %v", err)
+	}
+
+	rows, err := d.GetByIDs([]int64{resource.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("查询重置后的资源失败: %v, rows %v", err, rows)
+	}
+	got := rows[0]
+	if got.TaskState != models.TaskDiscovered || got.LocalState != models.LocalNone {
+		t.Fatalf("重置后状态 = %v/%v, want discovered/none", got.TaskState, got.LocalState)
+	}
+	if got.StateVersion != 4 {
+		t.Fatalf("重置后版本 = %d, want 4", got.StateVersion)
+	}
+	if got.FileName != nil || got.LocalPath != "" || got.FileSize != nil || got.DownloadedSize != nil {
+		t.Fatalf("重置后仍保留本地文件字段: %+v", got)
 	}
 }

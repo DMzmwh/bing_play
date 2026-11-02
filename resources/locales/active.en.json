@@ -50,6 +50,83 @@
     "description": "top navigation - system settings",
     "other": "Settings"
   },
+  "nav.tv": {
+    "description": "top navigation - live TV",
+    "other": "Live TV"
+  },
+
+  "tv.title": {
+    "description": "live TV - channel list title",
+    "other": "Channels"
+  },
+  "tv.search_placeholder": {
+    "description": "live TV - search input placeholder",
+    "other": "Search channels"
+  },
+  "tv.sync_last": {
+    "description": "live TV - last sync time, parameter Time",
+    "other": "Last updated: {{.Time}}"
+  },
+  "tv.sync_never": {
+    "description": "live TV - never synced",
+    "other": "Not synced yet"
+  },
+  "tv.empty_title": {
+    "description": "live TV - no channels",
+    "other": "No channels yet"
+  },
+  "tv.empty_hint": {
+    "description": "live TV - hint when there are no channels",
+    "other": "Channels will appear here after the subscription source syncs"
+  },
+  "tv.select_channel": {
+    "description": "live TV - hint when no channel is selected",
+    "other": "Select a channel from the left to start watching"
+  },
+  "tv.play_failed": {
+    "description": "live TV - channel playback failed",
+    "other": "Channel playback failed"
+  },
+  "tv.unsupported": {
+    "description": "live TV - HLS is not supported",
+    "other": "HLS playback is not supported in this environment"
+  },
+  "tv.proxy_fallback": {
+    "description": "live TV - switched to proxy after a direct connection failure",
+    "other": "Direct connection failed, switched to proxy playback"
+  },
+  "tv.prev_channel": {
+    "description": "live TV - player previous channel button tooltip",
+    "other": "Previous channel"
+  },
+  "tv.next_channel": {
+    "description": "live TV - player next channel button tooltip",
+    "other": "Next channel"
+  },
+  "tv.group_unknown": {
+    "description": "live TV - channels without a group",
+    "other": "Ungrouped"
+  },
+  "tv.error.fetch_failed": {
+    "description": "live TV - subscription request failed",
+    "other": "Failed to fetch the subscription source"
+  },
+  "tv.error.status": {
+    "description": "live TV - subscription returned an unexpected status",
+    "other": "The subscription source returned an unexpected status"
+  },
+  "tv.error.parse": {
+    "description": "live TV - subscription parse failed",
+    "other": "Failed to parse the subscription source"
+  },
+  "tv.error.empty": {
+    "description": "live TV - subscription contains no channels",
+    "other": "The subscription source contains no channels"
+  },
+  "tv.error.internal": {
+    "description": "live TV - failed to update channel data",
+    "other": "Failed to update channel data"
+  },
 
   "video.drop_tip": {
     "description": "player - shown while dragging a file over the play area",
@@ -58,6 +135,18 @@
   "video.play_failed": {
     "description": "player - fallback message when the player reports an error",
     "other": "Failed to play video"
+  },
+  "video.play": {
+    "description": "playlist context menu - play",
+    "other": "Play"
+  },
+  "video.remove": {
+    "description": "playlist context menu - delete",
+    "other": "Delete"
+  },
+  "video.remove_failed": {
+    "description": "playlist - failed to remove item",
+    "other": "Failed to remove from playlist"
   },
   "video.error_empty_path": {
     "description": "dropped video - empty path",
@@ -467,10 +556,6 @@
   "download.action.cancel": {
     "description": "download center - cancel button",
     "other": "Cancel task"
-  },
-  "download.action.repair": {
-    "description": "download center - repair button for missing files",
-    "other": "Repair"
   },
   "download.action.open_dir": {
     "description": "download center - open download folder button",

@@ -45,7 +45,7 @@
 
         <div class="table-wrap">
             <n-data-table
-                v-model:checked-row-keys="checkedIds"
+                :checked-row-keys="checkedIds"
                 remote
                 flex-height
                 size="small"
@@ -56,6 +56,7 @@
                 :row-key="rowKey"
                 :pagination="pagination"
                 style="height: 100%"
+                @update:checked-row-keys="handleCheckedRowKeysChange"
             >
                 <template #empty>
                     <div class="empty">
@@ -94,7 +95,7 @@ const sortValue = ref('latest')
 const page = ref(1)
 // 默认每页条数来自系统设置，用户切换分页大小时自动保存
 const pageSize = ref(settingNumber(SettingKeys.resourcePageSize, 100))
-// 多选下载：选中行的资源 ID，切换页码后自动清空，避免与分页数据不一致
+// 多选下载：选中行的资源 ID，跨页保留，仅在搜索/排序变化或下载成功后清空
 const checkedIds = ref<number[]>([])
 const downloading = ref(false)
 
@@ -252,6 +253,30 @@ function rowKey(row: CrawledResourceItem) {
     return row.id
 }
 
+/** 切换单行选中状态：点击标题列或复选框都走同一逻辑 */
+function toggleChecked(row: CrawledResourceItem) {
+    const id = rowKey(row)
+    const index = checkedIds.value.indexOf(id)
+    if (index >= 0) {
+        checkedIds.value.splice(index, 1)
+        return
+    }
+    checkedIds.value.push(id)
+}
+
+/**
+ * 跨页多选：remote 分页时表格只认识当前页的行，事件回传的 keys 会丢掉其他页的 ID。
+ * 这里保留非当前页的选择，再用事件里的当前页 keys 覆盖当前页部分。
+ */
+function handleCheckedRowKeysChange(keys: (string | number)[]) {
+    const pageKeys = new Set(items.value.map((row) => rowKey(row)))
+    const outside = checkedIds.value.filter((id) => !pageKeys.has(id))
+    const currentPage = keys
+        .map((key) => Number(key))
+        .filter((id) => pageKeys.has(id))
+    checkedIds.value = [...outside, ...currentPage]
+}
+
 const columns = computed<DataTableColumns<CrawledResourceItem>>(() => {
     const base: DataTableColumns<CrawledResourceItem> = [
         {
@@ -270,7 +295,17 @@ const columns = computed<DataTableColumns<CrawledResourceItem>>(() => {
             key: 'name',
             title: t('resources.col.name'),
             ellipsis: { tooltip: true },
-            minWidth: 200
+            minWidth: 200,
+            render: (row) =>
+                h(
+                    'span',
+                    {
+                        class: 'name-cell',
+                        title: row.name,
+                        onClick: () => toggleChecked(row)
+                    },
+                    row.name || '-'
+                )
         },
         {
             key: 'totalSize',
@@ -370,8 +405,6 @@ async function load() {
         })
         items.value = result?.items ?? []
         total.value = result?.total ?? 0
-        // 当前页数据已替换，清空上一页的选择
-        checkedIds.value = []
     } catch (error) {
         console.warn('加载种子资源列表失败:', error)
         loadError.value = true
@@ -380,12 +413,14 @@ async function load() {
     }
 }
 
-/** 关键词变化后回到第一页重新查询 */
+/* 关键词变化后回到第一页重新查询 */
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(keyword, () => {
     if (searchTimer) clearTimeout(searchTimer)
     searchTimer = setTimeout(() => {
         page.value = 1
+        // 查询条件变化后结果集不同，清空跨页选择
+        checkedIds.value = []
         void load()
     }, SEARCH_DEBOUNCE)
 })
@@ -393,6 +428,8 @@ watch(keyword, () => {
 /** 排序变化后回到第一页重新查询 */
 watch(sortValue, () => {
     page.value = 1
+    // 排序后行序改变，清空跨页选择
+    checkedIds.value = []
     void load()
 })
 
@@ -503,6 +540,16 @@ onBeforeUnmount(() => {
 .row-index {
     color: var(--app-text-dim);
     font-variant-numeric: tabular-nums;
+}
+
+/* 标题列可点击切换选中，光标提示可交互 */
+.name-cell {
+    cursor: pointer;
+    user-select: none;
+}
+
+.name-cell:hover {
+    color: var(--app-primary);
 }
 
 /* InfoHash 单元格：哈希文本 + 复制磁力链接按钮 */

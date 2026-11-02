@@ -9,5 +9,7 @@ var Module = fx.Module(
 	fx.Provide(
 		NewVideoHandler,
 		VideoRoute,
+		NewTVProxyHandler,
+		TVProxyRoute,
 	),
 )

@@ -86,5 +86,11 @@ func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
 		panic(err)
 	}
 	DB = gdb
+
+	// 历史本地视频记录的 local_path 存的是完整文件路径，统一为文件所在目录。
+	if err := NormalizeLocalResourcePaths(gdb); err != nil {
+		logger.Error.Error("本地视频路径归一化失败", slog.Any("err", err))
+	}
+
 	return gdb
 }

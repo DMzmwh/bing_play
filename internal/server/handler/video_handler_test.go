@@ -17,7 +17,16 @@ func TestLocalFilePath(t *testing.T) {
 	if err := os.WriteFile(videoPath, []byte("video"), 0o644); err != nil {
 		t.Fatalf("write video: %v", err)
 	}
-	name := fileName
+	subName := filepath.Join("Season 1", "episode.mkv")
+	subPath := filepath.Join(dir, subName)
+	if err := os.MkdirAll(filepath.Dir(subPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(subPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write video: %v", err)
+	}
+	empty := ""
+	missing := "missing.mp4"
 
 	cases := []struct {
 		name     string
@@ -33,26 +42,32 @@ func TestLocalFilePath(t *testing.T) {
 			wantCode: http.StatusNotFound,
 		},
 		{
+			name:     "缺少文件名",
+			resource: models.Resource{LocalPath: dir},
+			wantKey:  "video.error_file_required",
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "文件名为空",
+			resource: models.Resource{LocalPath: dir, FileName: &empty},
+			wantKey:  "video.error_file_required",
+			wantCode: http.StatusBadRequest,
+		},
+		{
 			name:     "文件不存在",
-			resource: models.Resource{LocalPath: filepath.Join(dir, "missing.mp4")},
+			resource: models.Resource{LocalPath: dir, FileName: &missing},
 			wantKey:  "video.error_not_found",
 			wantCode: http.StatusNotFound,
 		},
 		{
-			name:     "单文件资源",
-			resource: models.Resource{LocalPath: videoPath},
-			wantPath: videoPath,
-		},
-		{
 			name:     "目录资源按记录文件名解析",
-			resource: models.Resource{LocalPath: dir, FileName: &name},
+			resource: models.Resource{LocalPath: dir, FileName: &fileName},
 			wantPath: videoPath,
 		},
 		{
-			name:     "目录资源缺少文件名",
-			resource: models.Resource{LocalPath: dir},
-			wantKey:  "video.error_file_required",
-			wantCode: http.StatusBadRequest,
+			name:     "子目录文件按相对路径解析",
+			resource: models.Resource{LocalPath: dir, FileName: &subName},
+			wantPath: subPath,
 		},
 	}
 

@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"embed"
+	"log/slog"
 
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/i18n"
@@ -30,6 +32,34 @@ type VideoOpenedPayload struct {
 }
 
 var Version = "v1.0.1"
+
+// newWailsLogger 返回只保留 Info 及以上级别的 Wails 系统日志器。
+// Wails 在 Debug 级别会把每次绑定调用的完整结果写入日志，
+// 电视频道快照这类大对象会产生 MB 级日志，并在响应返回前同步写盘，拖慢前端渲染。
+func newWailsLogger(base *slog.Logger) *slog.Logger {
+	if base == nil {
+		return nil
+	}
+	return slog.New(&minLevelHandler{Handler: base.Handler(), min: slog.LevelInfo})
+}
+
+// minLevelHandler 在已有 Handler 上再叠加一个最小级别限制。
+type minLevelHandler struct {
+	slog.Handler
+	min slog.Level
+}
+
+func (h *minLevelHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return level >= h.min && h.Handler.Enabled(ctx, level)
+}
+
+func (h *minLevelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &minLevelHandler{Handler: h.Handler.WithAttrs(attrs), min: h.min}
+}
+
+func (h *minLevelHandler) WithGroup(name string) slog.Handler {
+	return &minLevelHandler{Handler: h.Handler.WithGroup(name), min: h.min}
+}
 
 type WailsAppParams struct {
 	fx.In
@@ -68,7 +98,7 @@ func NewWailsApp(p WailsAppParams) *application.App {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 
-		Logger: logger.App,
+		Logger: newWailsLogger(logger.App),
 
 		ShouldQuit: func() bool {
 			logger.App.Info("应用准备退出1")

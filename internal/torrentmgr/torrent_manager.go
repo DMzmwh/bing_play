@@ -137,6 +137,12 @@ func NewManager(lc fx.Lifecycle, cn WailsAppParams) (*TorrentManager, error) {
 	// 全客户端未校验数据上限（默认 64MiB），提高后高带宽下不易被校验阻塞
 	c.MaxUnverifiedBytes = 256 << 20
 
+	// 12. 减少高延迟链路下的无效传输。默认 0 允许请求在同一个 RTT 内被反复抢走，
+	// 每次抢占都会产生 Cancel 与重复分片；保留 1 秒让持有者完成一次尝试。
+	c.StealRequestGrace = time.Second
+	// 同一 Peer ID 的多个地址只保留一条连接，避免占用有限的连接名额。
+	c.DropDuplicatePeerIds = true
+
 	fmt.Println("goos:", c.DataDir)
 	c.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
 		return func() ([]dht.Addr, error) {
@@ -172,7 +178,11 @@ func NewManager(lc fx.Lifecycle, cn WailsAppParams) (*TorrentManager, error) {
 	// Shutdown 内部做了幂等处理，不会重复释放。
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
-			go manager.RecoverPendingJobs()
+			go func() {
+				// 先把历史「已取消」任务归一化为未下载，再恢复异常中断的任务。
+				manager.normalizeCancelledTasks()
+				manager.RecoverPendingJobs()
+			}()
 			return nil
 		},
 		OnStop: func(context.Context) error {
@@ -318,8 +328,9 @@ func sortDownloadVOs(result []*vo.TorrentJobVO) {
 // ListActiveJobs 返回下载页「待下载」列表快照。
 //
 // 数据库是待下载队列的唯一事实源：内存中有运行时数据的任务使用实时快照，
-// 其余未完成任务（重启后自动恢复中的任务、等待重试的任务、暂停 / 失败 / 取消的任务）
+// 其余未完成任务（重启后自动恢复中的任务、等待重试的任务、暂停 / 失败的任务）
 // 从数据库补齐，保证用户触发过的任务只要未完成就不会从列表中消失。
+// 取消的任务会恢复为未下载状态，不属于待下载队列。
 func (m *TorrentManager) ListActiveJobs() []*vo.TorrentJobVO {
 	m.mu.RLock()
 	jobs := make([]*TorrentJob, 0, len(m.jobsMap))
@@ -558,56 +569,454 @@ func (m *TorrentManager) retryJob(job *TorrentJob, priority int) error {
 	return nil
 }
 
-// RepairJob 修复本地文件缺失 / 损坏的已完成任务。
-func (m *TorrentManager) RepairJob(infoHash string) error {
-	if job, err := m.GetJob(infoHash); err == nil {
-		res, applyErr := job.Apply(models.EvRepair, models.EventPayload{Now: time.Now(), SourceAvailable: job.sourceAvailable()})
-		if applyErr != nil {
-			return applyErr
+// redownloadCompletedJob 让内存中的已完成任务重新下载本地缺失的数据。
+//
+// 返回 true 表示确实发起了重新下载；本地数据完整或任务不处于已完成状态时返回 false。
+func (m *TorrentManager) redownloadCompletedJob(job *TorrentJob) (bool, error) {
+	if job == nil || job.currentState() != models.TaskCompleted {
+		return false, nil
+	}
+	job.mu.RLock()
+	resource := job.job
+	job.mu.RUnlock()
+	if resource == nil || !localDataMissing(resource) {
+		return false, nil
+	}
+
+	now := time.Now()
+	job.mu.RLock()
+	localState := resource.LocalState
+	job.mu.RUnlock()
+	if localState == models.LocalPresent {
+		// 数据库仍认为是完整文件，先记录为丢失，满足 EvRepair 的守卫条件。
+		if _, err := job.Apply(models.EvFileLost, models.EventPayload{
+			Now:        now,
+			LossReason: models.LossNotFound,
+		}); err != nil {
+			return false, err
 		}
-		if res.Task != models.TaskPreparing {
-			return nil
-		}
-		job.resetContext()
-		if tt := job.getTorrent(); tt != nil {
-			tt.Drop()
-		}
-		if err := m.restartTorrent(job); err != nil {
-			m.failOrRetry(job, classifyTorrentError(err))
-			return nil
-		}
-		go m.waitMetadata(job)
+	}
+
+	res, err := job.Apply(models.EvRepair, models.EventPayload{
+		Now:             now,
+		SourceAvailable: job.sourceAvailable(),
+	})
+	if err != nil {
+		return false, err
+	}
+	if res.Task != models.TaskPreparing {
+		return false, nil
+	}
+
+	job.resetContext()
+	if tt := job.getTorrent(); tt != nil {
+		tt.Drop()
+	}
+	if err := m.restartTorrent(job); err != nil {
+		m.failOrRetry(job, classifyTorrentError(err))
+		return true, nil
+	}
+	go m.waitMetadata(job)
+	return true, nil
+}
+
+// RemoveFromPlaylist 从播放列表批量移除资源。
+//
+// 先一次查询全部资源，再按来源分类处理：本地视频批量删除数据库记录；种子资源
+// 批量重置为「未下载」。内存中仍有下载任务的种子需要逐个停止，磁盘文件均保留。
+func (m *TorrentManager) RemoveFromPlaylist(ids []int64) error {
+	ids = uniqueResourceIDs(ids)
+	if len(ids) == 0 {
 		return nil
 	}
 
-	resource, dbErr := m.ResourceDao.GetByInfoHash(infoHash)
-	if dbErr != nil {
-		return dbErr
+	rows, err := m.ResourceDao.GetByIDs(ids)
+	if err != nil || len(rows) == 0 {
+		return err
 	}
-	if resource == nil {
-		return errors.New(ErrKeyTaskNotFound)
+
+	now := time.Now()
+	localIDs := make([]int64, 0, len(rows))
+	resetIDs := make([]int64, 0, len(rows))
+	resetSet := make(map[int64]struct{}, len(rows))
+	var stopped bool
+	var firstErr error
+
+	for i := range rows {
+		resource := &rows[i]
+		if resource.Kind == models.KindLocal {
+			localIDs = append(localIDs, resource.ID)
+			continue
+		}
+
+		// 内存中仍有任务时逐个停止：取消上下文并释放 Torrent 句柄。
+		m.mu.RLock()
+		job := m.jobsMap[resource.InfoHash]
+		m.mu.RUnlock()
+		if job != nil {
+			if _, err := job.Apply(models.EvRemovePlaylist, models.EventPayload{Now: now}); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			m.mu.Lock()
+			if m.jobsMap[resource.InfoHash] == job {
+				delete(m.jobsMap, resource.InfoHash)
+			}
+			m.mu.Unlock()
+			stopped = true
+			continue
+		}
+
+		resetIDs = append(resetIDs, resource.ID)
+		resetSet[resource.ID] = struct{}{}
 	}
-	_, _, enqueueErr := m.enqueueResource(resource, 0, models.EvRepair)
-	return enqueueErr
+
+	if len(localIDs) > 0 {
+		if err := m.ResourceDao.DeleteByIDs(localIDs); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	if len(resetIDs) > 0 {
+		if err := m.ResourceDao.ResetToUndownloadedByIDs(resetIDs, now); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		// 批量更新完成后，用内存快照应用同一事件生成推送数据，不再逐条落库。
+		for i := range rows {
+			resource := &rows[i]
+			if _, ok := resetSet[resource.ID]; !ok {
+				continue
+			}
+			if _, err := resource.ApplyEvent(models.EvRemovePlaylist, models.EventPayload{Now: now}); err != nil {
+				continue
+			}
+			resource.UpdateTime = &now
+			emitDownloadEvent(EventDownloadStateChanged, voFromResource(resource))
+		}
+	}
+
+	if stopped {
+		go m.schedule()
+	}
+	return firstErr
 }
 
-// CancelJob 取消任务，保留数据库记录用于下载页展示。
+// uniqueResourceIDs 过滤非法 ID 并去重，避免批量查询与更新时重复处理。
+func uniqueResourceIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+// CancelJob 取消任务：恢复到「未下载」状态，并清理磁盘上的下载痕迹。
 func (m *TorrentManager) CancelJob(infoHash string) error {
 	job, err := m.GetJob(infoHash)
 	if err != nil {
-		return m.applyResourceEvent(infoHash, models.EvCancel, models.EventPayload{Now: time.Now()})
+		return m.cancelResourceByHash(infoHash)
 	}
 
-	if cancelErr := job.Cancel(); cancelErr != nil {
+	// Torrent 在取消后会被释放，先取出清理磁盘所需的元信息、保存目录与主文件名。
+	var (
+		info     *metainfo.Info
+		baseDir  string
+		fileName string
+	)
+	job.mu.RLock()
+	if job.job != nil {
+		baseDir = job.job.LocalPath
+		if job.job.FileName != nil {
+			fileName = *job.job.FileName
+		}
+	}
+	tt := job.torrent
+	job.mu.RUnlock()
+	if tt != nil {
+		info = tt.Info()
+	}
+	// 元信息尚未就绪时回退到下载目录的元信息缓存。
+	if info == nil {
+		info = readDownloadInfo(baseDir, infoHash)
+	}
+
+	res, cancelErr := job.Cancel()
+	if cancelErr != nil {
 		return cancelErr
+	}
+	// 已完成任务取消是幂等操作（结果仍为 Completed），不能删除已落盘的文件；
+	// 其余合法取消都会回到 Discovered，此时无论是否产生新版本都执行一次清理，
+	// 保证重复取消也能清掉残留的 part 文件。
+	if res.Task != models.TaskDiscovered {
+		return nil
 	}
 
 	m.mu.Lock()
 	delete(m.jobsMap, infoHash)
 	m.mu.Unlock()
 
+	m.cleanDownload(baseDir, infoHash, info, fileName)
 	go m.schedule()
 	return nil
+}
+
+// cancelResourceByHash 对内存中不存在的任务执行取消。
+func (m *TorrentManager) cancelResourceByHash(infoHash string) error {
+	resource, err := m.ResourceDao.GetByInfoHash(infoHash)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+	return m.cancelResource(resource)
+}
+
+// cancelResource 把资源记录恢复为「未下载」并清理磁盘下载痕迹。
+func (m *TorrentManager) cancelResource(resource *models.Resource) error {
+	if resource == nil || resource.Kind != models.KindTorrent {
+		return errors.New(ErrKeyTaskNotFound)
+	}
+
+	baseDir := resource.LocalPath
+	if baseDir == "" {
+		baseDir = m.currentDownloadDir()
+	}
+	fileName := ""
+	if resource.FileName != nil {
+		fileName = *resource.FileName
+	}
+
+	fromVersion := resource.StateVersion
+	now := time.Now()
+	res, err := resource.ApplyEvent(models.EvCancel, models.EventPayload{
+		Now:             now,
+		SourceAvailable: sourceAvailable(resource),
+	})
+	if err != nil {
+		return err
+	}
+	// 已完成 / 未下载状态重复取消为幂等操作：结果已不是 Discovered 说明资源仍处于
+	// 完成状态，不能清理磁盘数据；其余情况统一执行清理，重复取消也能清除残留。
+	if res.Task != models.TaskDiscovered {
+		return nil
+	}
+
+	resource.UpdateTime = &now
+	if err := m.persistState(resource, fromVersion); err != nil {
+		return err
+	}
+	m.cleanDownload(baseDir, resource.InfoHash, readDownloadInfo(baseDir, resource.InfoHash), fileName)
+	emitDownloadEvent(EventDownloadStateChanged, voFromResource(resource))
+	return nil
+}
+
+// normalizeCancelledTasks 把历史遗留的「已取消」任务恢复为未下载状态并清理磁盘痕迹。
+//
+// 新流程取消后不再停留在 Cancelled 状态，升级时需要对旧数据做一次归一化。
+func (m *TorrentManager) normalizeCancelledTasks() {
+	if m.closed.Load() {
+		return
+	}
+	rows, err := m.ResourceDao.ListByTaskStates([]models.TaskState{models.TaskCancelled})
+	if err != nil {
+		logger.Torrent.Warn("归一化已取消任务失败", slog.Any("err", err))
+		return
+	}
+	for i := range rows {
+		if err := m.cancelResource(&rows[i]); err != nil {
+			logger.Torrent.Warn("归一化已取消任务失败",
+				slog.String("info_hash", rows[i].InfoHash),
+				slog.Any("err", err),
+			)
+		}
+	}
+	if len(rows) > 0 {
+		logger.Torrent.Info("已归一化取消任务", slog.Int("count", len(rows)))
+	}
+}
+
+// cleanDownload 清理任务在磁盘上的下载痕迹：数据文件、元信息缓存与分片完成记录。
+func (m *TorrentManager) cleanDownload(baseDir, infoHash string, info *metainfo.Info, fileName string) {
+	removeDownloadFiles(baseDir, infoHash, info, fileName)
+	if info != nil {
+		m.clearPieceRecords(baseDir, infoHash, info.NumPieces())
+	}
+}
+
+// clearPieceRecords 清除任务的分片完成记录。
+// 数据文件删除后必须同步清除完成标记，否则重新下载时会沿用过期的完成记录。
+func (m *TorrentManager) clearPieceRecords(baseDir, infoHash string, numPieces int) {
+	if baseDir == "" || infoHash == "" || numPieces <= 0 {
+		return
+	}
+	pc, err := m.pieceCompletionForDir(baseDir)
+	if err != nil {
+		logger.Torrent.Warn("打开分片完成记录失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+		return
+	}
+
+	hash := metainfo.NewHashFromHex(infoHash)
+	for i := 0; i < numPieces; i++ {
+		key := metainfo.PieceKey{InfoHash: hash, Index: i}
+		if err := pc.Set(key, g.None[bool]()); err != nil {
+			logger.Torrent.Warn("清理分片完成记录失败",
+				slog.String("info_hash", infoHash),
+				slog.Int("piece", i),
+				slog.Any("err", err),
+			)
+			return
+		}
+	}
+}
+
+// removeDownloadFiles 删除任务的数据文件与元信息缓存，并清理因此变空的子目录。
+func removeDownloadFiles(baseDir, infoHash string, info *metainfo.Info, fileName string) {
+	if baseDir == "" {
+		return
+	}
+	base := filepath.Clean(baseDir)
+
+	if info != nil {
+		for _, file := range info.UpvertedFiles() {
+			path := torrentFilePath(base, info, file)
+			// 异常路径（含 .. / 空路径）一律跳过，绝不删除下载根目录之外的文件。
+			if path == base || !pathWithin(base, path) {
+				continue
+			}
+			removeTorrentDataFile(path)
+			removeEmptyDirs(filepath.Dir(path), base)
+		}
+	} else if fileName != "" {
+		path := filepath.Join(base, fileName)
+		if pathWithin(base, path) {
+			removeTorrentDataFile(path)
+			removeEmptyDirs(filepath.Dir(path), base)
+		}
+	}
+
+	if cache := metadataCachePath(base, infoHash); cache != "" {
+		removeFile(cache)
+	}
+	// .meta 目录只有在为空时才会被删除，不影响其他任务的元信息缓存。
+	_ = os.Remove(filepath.Join(base, metadataCacheDir))
+}
+
+// torrentFilePath 返回种子内单个文件的实际落盘路径。
+//
+// torrent 引擎把所有文件都放在 Info.Name 之下：单文件种子的 Name 即文件名，
+// 多文件种子的 FileInfo.Path 不含根目录名，因此统一拼接 Info.BestName()。
+func torrentFilePath(base string, info *metainfo.Info, file metainfo.FileInfo) string {
+	parts := append([]string{info.BestName()}, file.BestPath()...)
+	return filepath.Join(append([]string{base}, parts...)...)
+}
+
+// localDataMissing 判断已完成任务的本地数据是否仍与种子一致。
+//
+// 优先用下载目录的元信息缓存枚举全部文件（覆盖多文件种子），缓存缺失时退化为主文件检查，
+// 避免文件被外部删除后仍被当作「已完成」而跳过下载。
+func localDataMissing(resource *models.Resource) bool {
+	if resource == nil {
+		return true
+	}
+	base := resource.LocalPath
+	if base == "" {
+		return true
+	}
+	if info := readDownloadInfo(base, resource.InfoHash); info != nil {
+		base = filepath.Clean(base)
+		for _, file := range info.UpvertedFiles() {
+			// 跳过零长度文件，避免把不落盘的占位文件误判为缺失。
+			if file.Length <= 0 {
+				continue
+			}
+			path := torrentFilePath(base, info, file)
+			stat, err := os.Stat(path)
+			if err != nil || stat.IsDir() || stat.Size() != file.Length {
+				return true
+			}
+		}
+		return false
+	}
+	if resource.FileName == nil || strings.TrimSpace(*resource.FileName) == "" {
+		// 没有可校验的路径信息时不主动重建任务。
+		return false
+	}
+	path := filepath.Join(base, *resource.FileName)
+	stat, err := os.Stat(path)
+	if err != nil || stat.IsDir() {
+		return true
+	}
+	return resource.FileSize != nil && stat.Size() != *resource.FileSize
+}
+
+// torrentPartSuffix 分片文件模式下未完成数据使用的临时后缀。
+// anacrolix 的文件存储默认开启 part files，下载中的数据写在 <文件>.part，
+// 取消时必须连同正式文件一起删除，否则会残留已下载分片并在下次下载时被复用。
+const torrentPartSuffix = ".part"
+
+// removeTorrentDataFile 删除种子数据文件及其 part 临时文件。
+func removeTorrentDataFile(path string) {
+	removeFile(path)
+	removeFile(path + torrentPartSuffix)
+}
+
+// removeFile 删除文件，文件不存在时忽略。
+func removeFile(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		logger.Torrent.Warn("清理下载文件失败", slog.String("path", path), slog.Any("err", err))
+	}
+}
+
+// removeEmptyDirs 自 dir 起逐级向上删除空目录，遇到 base 或非空目录时停止。
+func removeEmptyDirs(dir, base string) {
+	dir = filepath.Clean(dir)
+	for dir != base && pathWithin(base, dir) {
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// pathWithin 判断 path 是否位于 base 目录内，防止种子中的异常路径删除目录外文件。
+func pathWithin(base, path string) bool {
+	rel, err := filepath.Rel(base, filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// readDownloadInfo 从下载目录的元信息缓存解析文件列表，缓存缺失或损坏时返回 nil。
+func readDownloadInfo(baseDir, infoHash string) *metainfo.Info {
+	path := metadataCachePath(baseDir, infoHash)
+	if path == "" {
+		return nil
+	}
+	mi, err := metainfo.LoadFromFile(path)
+	if err != nil {
+		return nil
+	}
+	// 只有缓存与目标 InfoHash 一致时才使用，避免清理到其他任务的文件。
+	if mi.HashInfoBytes().HexString() != strings.ToLower(strings.TrimSpace(infoHash)) {
+		return nil
+	}
+	info, err := mi.UnmarshalInfo()
+	if err != nil {
+		return nil
+	}
+	return &info
 }
 
 // SetPriority 调整任务优先级，数值越大越先下载。
@@ -1022,9 +1431,9 @@ func (m *TorrentManager) cacheMetadata(baseDir, infoHash string, tt *torrent.Tor
 
 // recoverTaskStates 应用启动时需要自动恢复的任务状态。
 //
-// Paused（用户暂停）与 Cancelled（用户取消）属于明确的用户意图，不自动恢复，
-// 但仍通过数据库查询保留在「待下载」列表。Failed 属于异常中断（元信息超时、
-// 挂载失败、网络中断、应用强制退出等），需要自动重新入队。
+// Paused（用户暂停）属于用户明确的意图，不自动恢复，但仍通过数据库查询保留在
+// 「待下载」列表。Failed 属于异常中断（元信息超时、挂载失败、网络中断、应用强制
+// 退出等），需要自动重新入队。取消的任务已恢复为未下载状态，不会进入恢复流程。
 var recoverTaskStates = []models.TaskState{
 	models.TaskPreparing,
 	models.TaskQueued,
@@ -1266,15 +1675,16 @@ func (m *TorrentManager) checkCompletedLocalFiles() {
 	}
 	for i := range rows {
 		resource := &rows[i]
-		if resource.LocalState != models.LocalPresent || resource.FileName == nil || resource.LocalPath == "" {
+		if resource.LocalState != models.LocalPresent || resource.LocalPath == "" {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(resource.LocalPath, *resource.FileName)); err != nil {
-			m.applyResourceEvent(resource.InfoHash, models.EvFileLost, models.EventPayload{
-				Now:        time.Now(),
-				LossReason: models.LossNotFound,
-			})
+		if !localDataMissing(resource) {
+			continue
 		}
+		m.applyResourceEvent(resource.InfoHash, models.EvFileLost, models.EventPayload{
+			Now:        time.Now(),
+			LossReason: models.LossNotFound,
+		})
 	}
 }
 
@@ -1404,7 +1814,7 @@ func (m *TorrentManager) specFromResource(resource *models.Resource) (*torrent.T
 	return spec, magnet, torrentPath, nil
 }
 
-// enqueueResource 从数据库记录重新入队（继续 / 恢复 / 重试 / 修复）。
+// enqueueResource 从数据库记录重新入队（继续 / 恢复 / 重试 / 已完成文件缺失后重新下载）。
 //
 // e 为 0 时按当前状态自动选择事件：Failed → 手动重试、Cancelled → 重新下载、其余 → 新增下载。
 func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int, e models.Event) (string, bool, error) {
@@ -1414,11 +1824,29 @@ func (m *TorrentManager) enqueueResource(resource *models.Resource, priority int
 	if resource.Kind == models.KindLocal {
 		return "", false, nil
 	}
-	if resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent {
-		return "", false, nil
+	// 内存中已有同一任务：已完成且本地文件被删除时重新下载，其余情况保持幂等。
+	if job, jobErr := m.GetJob(resource.InfoHash); jobErr == nil {
+		restarted, restartErr := m.redownloadCompletedJob(job)
+		return resource.InfoHash, restarted, restartErr
 	}
 	if resource.TaskState.Active() {
 		return "", false, nil
+	}
+	// 已完成任务：本地数据仍在时跳过；文件被外部删除时重新下载。
+	if resource.TaskState == models.TaskCompleted {
+		if resource.LocalState == models.LocalPresent {
+			if !localDataMissing(resource) {
+				return "", false, nil
+			}
+			// 先记录为文件丢失（Completed -> Completed/Missing），再由 EvRepair 重新下载。
+			if _, err := resource.ApplyEvent(models.EvFileLost, models.EventPayload{
+				Now:        time.Now(),
+				LossReason: models.LossNotFound,
+			}); err != nil {
+				return "", false, err
+			}
+		}
+		e = models.EvRepair
 	}
 	if e == 0 {
 		switch resource.TaskState {
@@ -1454,7 +1882,7 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	// 统一使用十六进制字符串，与爬虫记录和磁力链接中的 InfoHash 保持一致。
 	infoHash := spec.InfoHash.HexString()
 
-	// 内存中已有同一任务：只提升优先级，避免重复添加。
+	// 内存中已有同一任务：只提升优先级，避免重复添加；已完成任务的文件被删除时重新下载。
 	m.mu.Lock()
 	if existing := m.jobsMap[infoHash]; existing != nil {
 		m.mu.Unlock()
@@ -1466,7 +1894,11 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 			}
 			m.emitState(existing)
 		}
-		return infoHash, false, nil
+		restarted, restartErr := m.redownloadCompletedJob(existing)
+		if restartErr != nil {
+			return infoHash, false, restartErr
+		}
+		return infoHash, restarted, nil
 	}
 	m.mu.Unlock()
 
@@ -1491,9 +1923,20 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	} else if resource.Kind == models.KindLocal {
 		// 本地视频不进入下载流程
 		return infoHash, false, nil
-	} else if resource.TaskState == models.TaskCompleted && resource.LocalState == models.LocalPresent {
-		// 已完成且本地文件齐全，无需重复下载
-		return infoHash, false, nil
+	} else if resource.TaskState == models.TaskCompleted {
+		// 已完成但本地文件已被删除：重新下载；文件仍在时跳过。
+		if resource.LocalState == models.LocalPresent {
+			if !localDataMissing(resource) {
+				return infoHash, false, nil
+			}
+			if _, err := resource.ApplyEvent(models.EvFileLost, models.EventPayload{
+				Now:        now,
+				LossReason: models.LossNotFound,
+			}); err != nil {
+				return infoHash, false, err
+			}
+		}
+		e = models.EvRepair
 	} else if resource.TaskState.Active() {
 		// 已有任务在活跃流程中，避免重复挂载
 		return infoHash, false, nil
@@ -1769,7 +2212,8 @@ func (m *TorrentManager) pieceCompletionForDir(dir string) (storage.PieceComplet
 }
 
 // publicTrackers 公共 tracker，用于补齐只带 DHT / x.pe 的磁力链接。
-// 数量不宜过多，避免 announce 拖慢启动；来源可参考 https://github.com/ngosang/trackerslist。
+// 保持在 20 条左右：太少 peer 发现不足，太多会拖慢 announce 启动；
+// 来源可参考 https://github.com/ngosang/trackerslist。
 var publicTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
 	"udp://open.stealth.si:80/announce",
@@ -1781,6 +2225,16 @@ var publicTrackers = []string{
 	"udp://opentracker.io:6969/announce",
 	"udp://tracker1.bt.moack.co.kr:80/announce",
 	"http://tracker.openbittorrent.com:80/announce",
+	"udp://tracker.qu.ax:6969/announce",
+	"udp://tracker.fnix.net:6969/announce",
+	"udp://tracker.0x7c0.com:6969/announce",
+	"udp://tracker.bittor.pw:1337/announce",
+	"udp://tracker.gbitt.info:80/announce",
+	"udp://tracker-udp.gbitt.info:80/announce",
+	"udp://tracker.torrust-demo.com:6969/announce",
+	"udp://tracker.zhuqiy.com:6969/announce",
+	"udp://ipv6.tracker.harry.lu:80/announce",
+	"https://tracker.tamersunion.org:443/announce",
 }
 
 // mergePublicTrackers 把公共 tracker 追加到 spec，已存在的不重复添加。
@@ -1927,7 +2381,7 @@ func sourceAvailable(resource *models.Resource) bool {
 
 // OpenDownloadDir 打开已完成任务的下载目录。
 //
-// LocalPath 可能是文件也可能是目录：是目录就打开它，是文件就打开其所在目录。
+// local_path 统一保存下载目录，直接打开即可。
 func (m *TorrentManager) OpenDownloadDir(infoHash string) error {
 	infoHash = strings.TrimSpace(infoHash)
 	if infoHash == "" {
@@ -1946,18 +2400,9 @@ func (m *TorrentManager) OpenDownloadDir(infoHash string) error {
 		return errors.New(ErrKeyTaskNotFound)
 	}
 
-	path := strings.TrimSpace(resource.LocalPath)
-	if path == "" {
+	dir := strings.TrimSpace(resource.LocalPath)
+	if dir == "" {
 		return errors.New(ErrKeyOpenDirFailed)
-	}
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return errors.New(ErrKeyOpenDirFailed)
-	}
-	dir := path
-	if !fileInfo.IsDir() {
-		dir = filepath.Dir(path)
 	}
 
 	if err := openDirectory(dir); err != nil {

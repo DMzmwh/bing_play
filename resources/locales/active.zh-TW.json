@@ -50,6 +50,83 @@
     "description": "頂部導覽 - 系統設定",
     "other": "設定"
   },
+  "nav.tv": {
+    "description": "頂部導覽 - 電視直播",
+    "other": "電視直播"
+  },
+
+  "tv.title": {
+    "description": "電視直播 - 左側頻道清單標題",
+    "other": "電視清單"
+  },
+  "tv.search_placeholder": {
+    "description": "電視直播 - 搜尋頻道輸入框佔位",
+    "other": "搜尋頻道"
+  },
+  "tv.sync_last": {
+    "description": "電視直播 - 上次同步時間，參數 Time",
+    "other": "上次更新：{{.Time}}"
+  },
+  "tv.sync_never": {
+    "description": "電視直播 - 尚未同步",
+    "other": "尚未同步"
+  },
+  "tv.empty_title": {
+    "description": "電視直播 - 尚無頻道資料",
+    "other": "尚無頻道資料"
+  },
+  "tv.empty_hint": {
+    "description": "電視直播 - 無頻道時的提示",
+    "other": "訂閱源同步完成後，頻道會自動出現在這裡"
+  },
+  "tv.select_channel": {
+    "description": "電視直播 - 尚未選擇頻道時的提示",
+    "other": "從左側選擇頻道開始播放"
+  },
+  "tv.play_failed": {
+    "description": "電視直播 - 頻道播放失敗",
+    "other": "頻道播放失敗"
+  },
+  "tv.unsupported": {
+    "description": "電視直播 - 目前環境不支援 HLS",
+    "other": "目前環境不支援 HLS 播放"
+  },
+  "tv.proxy_fallback": {
+    "description": "電視直播 - 直連失敗後自動切換代理播放",
+    "other": "直連失敗，已切換代理播放"
+  },
+  "tv.prev_channel": {
+    "description": "電視直播 - 播放器上一個頻道按鈕提示",
+    "other": "上一個頻道"
+  },
+  "tv.next_channel": {
+    "description": "電視直播 - 播放器下一個頻道按鈕提示",
+    "other": "下一個頻道"
+  },
+  "tv.group_unknown": {
+    "description": "電視直播 - 未分組頻道",
+    "other": "未分組"
+  },
+  "tv.error.fetch_failed": {
+    "description": "電視直播 - 訂閱源請求失敗",
+    "other": "訂閱源請求失敗"
+  },
+  "tv.error.status": {
+    "description": "電視直播 - 訂閱源回傳異常狀態",
+    "other": "訂閱源回傳異常狀態"
+  },
+  "tv.error.parse": {
+    "description": "電視直播 - 訂閱源內容解析失敗",
+    "other": "訂閱源內容解析失敗"
+  },
+  "tv.error.empty": {
+    "description": "電視直播 - 訂閱源未包含頻道",
+    "other": "訂閱源未包含頻道"
+  },
+  "tv.error.internal": {
+    "description": "電視直播 - 頻道資料更新失敗",
+    "other": "頻道資料更新失敗"
+  },
 
   "video.drop_tip": {
     "description": "播放區 - 拖入檔案時提示放開",
@@ -58,6 +135,18 @@
   "video.play_failed": {
     "description": "播放區 - 播放器失敗備援提示",
     "other": "影片播放失敗"
+  },
+  "video.play": {
+    "description": "播放清單右鍵選單 - 播放",
+    "other": "播放"
+  },
+  "video.remove": {
+    "description": "播放清單右鍵選單 - 刪除",
+    "other": "刪除"
+  },
+  "video.remove_failed": {
+    "description": "播放清單 - 刪除失敗",
+    "other": "移出播放清單失敗"
   },
   "video.error_empty_path": {
     "description": "拖入影片 - 路徑為空",
@@ -467,10 +556,6 @@
   "download.action.cancel": {
     "description": "下載中心 - 按鈕：取消",
     "other": "取消任務"
-  },
-  "download.action.repair": {
-    "description": "下載中心 - 按鈕：修復檔案遺失",
-    "other": "修復"
   },
   "download.action.open_dir": {
     "description": "下載中心 - 按鈕：開啟下載目錄",

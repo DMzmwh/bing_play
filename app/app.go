@@ -17,6 +17,7 @@ import (
 	"github.com/bing/bing-play/internal/service"
 	"github.com/bing/bing-play/internal/torrentmgr"
 	"github.com/bing/bing-play/internal/transcode"
+	"github.com/bing/bing-play/internal/tv"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/fx"
@@ -59,6 +60,7 @@ func NewApp(assets embed.FS, icon AppIcon) *App {
 		torrentmgr.Module,
 		dhtcrawler.Module,
 		transcode.Module,
+		tv.Module,
 		// =========================
 		// Wails assets
 		// =========================

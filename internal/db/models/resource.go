@@ -31,7 +31,8 @@ type Resource struct {
 	// ResourceName 资源名称，例如电影名称、视频名称。
 	ResourceName *string `gorm:"column:resource_name"`
 
-	// FileName 文件名称，例如 movie.mkv。
+	// FileName 文件名称，例如 movie.mp4。
+	// 相对于 LocalPath；多文件种子可能是子目录内的文件名。
 	FileName *string `gorm:"column:file_name"`
 
 	// SourceURL 资源来源地址，例如 Magnet、HTTP 下载地址等。
@@ -57,7 +58,8 @@ type Resource struct {
 	// 本地文件
 	// =========================================================
 
-	// LocalPath 下载文件在本地的绝对路径。
+	// LocalPath 文件在本地的目录。
+	// 本地视频与种子记录语义一致，实际文件路径为 LocalPath + FileName。
 	LocalPath string `gorm:"column:local_path"`
 
 	// FileSize 本地文件实际大小，单位：Byte。
