@@ -231,15 +231,14 @@ func (s *VideoService) OpenLocalVideo(path string) (*OpenVideoResult, error) {
 	resource.FileSize = &fileSize
 	resource.MimeType = &mimeType
 	resource.ResourceType = filetype.Video
-	resource.Kind = models.KindLocal
-	resource.TaskState = models.TaskCompleted
 	resource.LocalState = models.LocalPresent
 	resource.LocalLossReason = models.LossNone
-	resource.StateVersion++
-	resource.StateChangedAt = &now
 	resource.VerifiedAt = &now
 	resource.LocalCheckedAt = &now
 	resource.UpdateTime = &now
+	if resource.CreateTime == nil {
+		resource.CreateTime = &now
+	}
 
 	if err := s.resourceDao.SaveLocalResource(resource); err != nil {
 		slog.Error("保存本地资源失败", "path", path, "err", err)

@@ -172,7 +172,7 @@ func (h *VideoHandler) Prepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resource, err := h.resourceDao.Get(r.PathValue("id"))
+	resource, err := h.resourceDao.GetLocalFile(r.PathValue("id"))
 	if err != nil {
 		http.Error(w, h.i18nService.T("video.error_query_failed", nil), http.StatusInternalServerError)
 		return
@@ -409,7 +409,7 @@ func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	fmt.Println("视频id-----" + id)
 	//todo 视频查询，判断是否下载完成等
-	rr, err := h.resourceDao.Get("1")
+	rr, err := h.resourceDao.GetLocalFile("1")
 	if err != nil {
 		panic(err)
 	}
@@ -435,7 +435,7 @@ func (h *VideoHandler) VideoLocal(w http.ResponseWriter, r *http.Request) {
 func (h *VideoHandler) Video(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	resource, err := h.resourceDao.Get(id)
+	resource, err := h.resourceDao.GetLocalFile(id)
 	if err != nil {
 		http.Error(w, h.i18nService.T("video.error_query_failed", nil), http.StatusInternalServerError)
 		return

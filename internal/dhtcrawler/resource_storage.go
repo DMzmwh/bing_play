@@ -79,8 +79,8 @@ func asTorrentRecord(item any) (storage.TorrentRecord, bool) {
 	return storage.TorrentRecord{}, false
 }
 
-// toResource 把爬虫记录转换成 resources 表实体。
-// 爬虫只负责发现资源，因此本地状态固定为未下载。
+// toResource 把爬虫记录转换成资源元数据。
+// 爬虫只负责发现资源，不写下载状态与本地文件。
 func toResource(record storage.TorrentRecord) *models.Resource {
 	name := record.Name
 	size := record.Size
@@ -91,17 +91,12 @@ func toResource(record storage.TorrentRecord) *models.Resource {
 	}
 
 	return &models.Resource{
-		ResourceName:   &name,
-		InfoHash:       record.InfoHash,
-		SourceURL:      &sourceURL,
-		TotalSize:      &size,
-		Kind:           models.KindTorrent,
-		TaskState:      models.TaskDiscovered,
-		LocalState:     models.LocalNone,
-		MaxAttempts:    3,
-		StateChangedAt: &discoveredAt,
-		CreateTime:     &discoveredAt,
-		UpdateTime:     &discoveredAt,
+		ResourceName: &name,
+		InfoHash:     record.InfoHash,
+		SourceURL:    &sourceURL,
+		TotalSize:    &size,
+		CreateTime:   &discoveredAt,
+		UpdateTime:   &discoveredAt,
 	}
 }
 

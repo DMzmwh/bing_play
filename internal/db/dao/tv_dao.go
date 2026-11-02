@@ -49,6 +49,17 @@ type tvSourceCount struct {
 	Count    int64 `gorm:"column:count"`
 }
 
+// CountChannels 统计指定订阅源的频道数。
+func (d *TvDAO) CountChannels(sourceID int64) (int64, error) {
+	var count int64
+	err := d.db.
+		Model(&models.TVChannel{}).
+		Where("source_id = ?", sourceID).
+		Count(&count).
+		Error
+	return count, err
+}
+
 // CountChannelsBySource 统计每个订阅源的频道数。
 func (d *TvDAO) CountChannelsBySource() (map[int64]int64, error) {
 	var rows []tvSourceCount
@@ -70,23 +81,30 @@ func (d *TvDAO) CountChannelsBySource() (map[int64]int64, error) {
 }
 
 // UpdateSourceSync 写回订阅源同步状态。
+//
+// syncedAt 为 nil 表示本次没有取得有效结果，此时不写 last_sync_at，
+// 让从未成功同步过的订阅源继续被调度器重试。
 func (d *TvDAO) UpdateSourceSync(
 	id int64,
-	syncedAt time.Time,
+	syncedAt *time.Time,
 	lastError string,
 	etag string,
 	lastModified string,
 ) error {
 	now := time.Now()
+	fields := map[string]any{
+		"last_error":    lastError,
+		"etag":          etag,
+		"last_modified": lastModified,
+		"update_time":   &now,
+	}
+	if syncedAt != nil {
+		fields["last_sync_at"] = syncedAt
+	}
+
 	return d.db.Model(&models.TVSource{}).
 		Where("id = ?", id).
-		Updates(map[string]any{
-			"last_sync_at":  &syncedAt,
-			"last_error":    lastError,
-			"etag":          etag,
-			"last_modified": lastModified,
-			"update_time":   &now,
-		}).
+		Updates(fields).
 		Error
 }
 

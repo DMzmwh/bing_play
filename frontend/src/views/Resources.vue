@@ -17,14 +17,14 @@
                 />
             </div>
             <div class="toolbar-right">
-                <span v-if="checkedIds.length" class="selected">
-                    {{ t("resources.batch_selected", { Count: checkedIds.length }) }}
+                <span v-if="checkedHashes.length" class="selected">
+                    {{ t("resources.batch_selected", { Count: checkedHashes.length }) }}
                 </span>
                 <n-button
                     size="small"
                     type="primary"
                     :loading="downloading"
-                    :disabled="!checkedIds.length"
+                    :disabled="!checkedHashes.length"
                     @click="batchDownload"
                 >
                     {{ t("resources.batch_download") }}
@@ -45,7 +45,7 @@
 
         <div class="table-wrap">
             <n-data-table
-                :checked-row-keys="checkedIds"
+                :checked-row-keys="checkedHashes"
                 remote
                 flex-height
                 size="small"
@@ -95,8 +95,8 @@ const sortValue = ref('latest')
 const page = ref(1)
 // 默认每页条数来自系统设置，用户切换分页大小时自动保存
 const pageSize = ref(settingNumber(SettingKeys.resourcePageSize, 100))
-// 多选下载：选中行的资源 ID，跨页保留，仅在搜索/排序变化或下载成功后清空
-const checkedIds = ref<number[]>([])
+// 多选下载：选中行的 InfoHash，跨页保留，仅在搜索/排序变化或下载成功后清空
+const checkedHashes = ref<string[]>([])
 const downloading = ref(false)
 
 const message = useMessage()
@@ -208,16 +208,16 @@ async function copyMagnet(url: string) {
     }
 }
 
-/** 批量下载选中的资源：后端按资源 ID 入队，返回新增 / 跳过 / 失败统计 */
+/** 批量下载选中的资源：后端按 InfoHash 入队，返回新增 / 跳过 / 失败统计 */
 async function batchDownload() {
-    if (!checkedIds.value.length) {
+    if (!checkedHashes.value.length) {
         message.warning(t('resources.batch_empty'))
         return
     }
 
     downloading.value = true
     try {
-        const result = await DownloadResources(checkedIds.value, 0)
+        const result = await DownloadResources(checkedHashes.value, 0)
         if (!result) return
 
         message.success(
@@ -233,7 +233,7 @@ async function batchDownload() {
             )
         }
 
-        checkedIds.value = []
+        checkedHashes.value = []
         // 状态已变化，重新拉取当前页以展示最新下载状态
         void load()
     } catch (error) {
@@ -250,31 +250,31 @@ function rowIndex(index: number): number {
 }
 
 function rowKey(row: CrawledResourceItem) {
-    return row.id
+    return row.infoHash
 }
 
 /** 切换单行选中状态：点击标题列或复选框都走同一逻辑 */
 function toggleChecked(row: CrawledResourceItem) {
-    const id = rowKey(row)
-    const index = checkedIds.value.indexOf(id)
+    const hash = rowKey(row)
+    const index = checkedHashes.value.indexOf(hash)
     if (index >= 0) {
-        checkedIds.value.splice(index, 1)
+        checkedHashes.value.splice(index, 1)
         return
     }
-    checkedIds.value.push(id)
+    checkedHashes.value.push(hash)
 }
 
 /**
- * 跨页多选：remote 分页时表格只认识当前页的行，事件回传的 keys 会丢掉其他页的 ID。
+ * 跨页多选：remote 分页时表格只认识当前页的行，事件回传的 keys 会丢掉其他页的 InfoHash。
  * 这里保留非当前页的选择，再用事件里的当前页 keys 覆盖当前页部分。
  */
 function handleCheckedRowKeysChange(keys: (string | number)[]) {
     const pageKeys = new Set(items.value.map((row) => rowKey(row)))
-    const outside = checkedIds.value.filter((id) => !pageKeys.has(id))
+    const outside = checkedHashes.value.filter((hash) => !pageKeys.has(hash))
     const currentPage = keys
-        .map((key) => Number(key))
-        .filter((id) => pageKeys.has(id))
-    checkedIds.value = [...outside, ...currentPage]
+        .map((key) => String(key))
+        .filter((hash) => pageKeys.has(hash))
+    checkedHashes.value = [...outside, ...currentPage]
 }
 
 const columns = computed<DataTableColumns<CrawledResourceItem>>(() => {
@@ -420,7 +420,7 @@ watch(keyword, () => {
     searchTimer = setTimeout(() => {
         page.value = 1
         // 查询条件变化后结果集不同，清空跨页选择
-        checkedIds.value = []
+        checkedHashes.value = []
         void load()
     }, SEARCH_DEBOUNCE)
 })
@@ -429,7 +429,7 @@ watch(keyword, () => {
 watch(sortValue, () => {
     page.value = 1
     // 排序后行序改变，清空跨页选择
-    checkedIds.value = []
+    checkedHashes.value = []
     void load()
 })
 

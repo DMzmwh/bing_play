@@ -630,15 +630,15 @@ func (m *TorrentManager) RemoveFromPlaylist(ids []int64) error {
 		return nil
 	}
 
-	rows, err := m.ResourceDao.GetByIDs(ids)
+	rows, err := m.ResourceDao.GetLocalFilesByIDs(ids)
 	if err != nil || len(rows) == 0 {
 		return err
 	}
 
 	now := time.Now()
 	localIDs := make([]int64, 0, len(rows))
-	resetIDs := make([]int64, 0, len(rows))
-	resetSet := make(map[int64]struct{}, len(rows))
+	resetHashes := make([]string, 0, len(rows))
+	resetSet := make(map[string]struct{}, len(rows))
 	var stopped bool
 	var firstErr error
 
@@ -669,24 +669,24 @@ func (m *TorrentManager) RemoveFromPlaylist(ids []int64) error {
 			continue
 		}
 
-		resetIDs = append(resetIDs, resource.ID)
-		resetSet[resource.ID] = struct{}{}
+		resetHashes = append(resetHashes, resource.InfoHash)
+		resetSet[resource.InfoHash] = struct{}{}
 	}
 
 	if len(localIDs) > 0 {
-		if err := m.ResourceDao.DeleteByIDs(localIDs); err != nil && firstErr == nil {
+		if err := m.ResourceDao.DeleteLocalFilesByIDs(localIDs); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 
-	if len(resetIDs) > 0 {
-		if err := m.ResourceDao.ResetToUndownloadedByIDs(resetIDs, now); err != nil && firstErr == nil {
+	if len(resetHashes) > 0 {
+		if err := m.ResourceDao.ResetToUndownloadedByHashes(resetHashes, now); err != nil && firstErr == nil {
 			firstErr = err
 		}
 		// 批量更新完成后，用内存快照应用同一事件生成推送数据，不再逐条落库。
 		for i := range rows {
 			resource := &rows[i]
-			if _, ok := resetSet[resource.ID]; !ok {
+			if _, ok := resetSet[resource.InfoHash]; !ok {
 				continue
 			}
 			if _, err := resource.ApplyEvent(models.EvRemovePlaylist, models.EventPayload{Now: now}); err != nil {
@@ -1024,9 +1024,9 @@ func (m *TorrentManager) SetPriority(infoHash string, priority int) error {
 	job, err := m.GetJob(infoHash)
 	if err == nil {
 		if job.forcePriority(priority) {
-			if id := job.id(); id != 0 {
-				if err := m.ResourceDao.UpdatePriority(id, priority); err != nil {
-					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+			if hash := job.infoHash(); hash != "" {
+				if err := m.ResourceDao.UpdatePriority(hash, priority); err != nil {
+					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", hash), slog.Any("err", err))
 				}
 			}
 			m.emitState(job)
@@ -1042,10 +1042,7 @@ func (m *TorrentManager) SetPriority(infoHash string, priority int) error {
 	if resource == nil {
 		return errors.New(ErrKeyTaskNotFound)
 	}
-	resource.Priority = &priority
-	now := time.Now()
-	resource.UpdateTime = &now
-	return m.ResourceDao.Save(resource)
+	return m.ResourceDao.UpdatePriority(infoHash, priority)
 }
 
 // applyResourceEvent 对内存中不存在的任务直接执行状态机流转并落库。
@@ -1090,7 +1087,7 @@ const statePersistAttempts = 3
 // 状态迁移（入队、恢复、失败、取消）必须落库成功，避免异常场景下内存与数据库
 // 版本不一致导致任务被误判为未触发下载而从待下载列表丢失。
 func (m *TorrentManager) persistState(resource *models.Resource, fromVersion uint64) error {
-	if resource == nil || resource.ID == 0 {
+	if resource == nil || resource.InfoHash == "" {
 		return nil
 	}
 
@@ -1727,14 +1724,14 @@ func (m *TorrentManager) AddMagnets(magnets []string, priority int) *BatchDownlo
 	return result
 }
 
-// DownloadResources 按资源 ID 批量加入下载队列，用于种子资源页的多选下载。
-func (m *TorrentManager) DownloadResources(ids []int64, priority int) (*BatchDownloadResult, error) {
+// DownloadResources 按 InfoHash 批量加入下载队列，用于种子资源页的多选下载。
+func (m *TorrentManager) DownloadResources(infoHashes []string, priority int) (*BatchDownloadResult, error) {
 	result := &BatchDownloadResult{}
-	if len(ids) == 0 {
+	if len(infoHashes) == 0 {
 		return result, nil
 	}
 
-	rows, err := m.ResourceDao.GetByIDs(ids)
+	rows, err := m.ResourceDao.GetByInfoHashes(infoHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -1887,9 +1884,9 @@ func (m *TorrentManager) enqueueSpec(spec *torrent.TorrentSpec, magnet, torrentP
 	if existing := m.jobsMap[infoHash]; existing != nil {
 		m.mu.Unlock()
 		if existing.setPriority(priority) {
-			if id := existing.id(); id != 0 {
-				if err := m.ResourceDao.UpdatePriority(id, priority); err != nil {
-					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+			if hash := existing.infoHash(); hash != "" {
+				if err := m.ResourceDao.UpdatePriority(hash, priority); err != nil {
+					logger.Torrent.Error("更新任务优先级失败", slog.String("info_hash", hash), slog.Any("err", err))
 				}
 			}
 			m.emitState(existing)
@@ -2326,16 +2323,6 @@ func (job *TorrentJob) saveDir() string {
 		return ""
 	}
 	return job.job.LocalPath
-}
-
-// id 返回资源主键。
-func (job *TorrentJob) id() int64 {
-	job.mu.RLock()
-	defer job.mu.RUnlock()
-	if job.job == nil {
-		return 0
-	}
-	return job.job.ID
 }
 
 // attempt 返回当前连续失败次数。

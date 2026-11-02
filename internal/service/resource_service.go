@@ -20,13 +20,10 @@ type CrawledResourceQuery struct {
 
 // CrawledResourceItem 列表中的单条爬取资源。
 type CrawledResourceItem struct {
-	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	InfoHash  string `json:"infoHash"`
 	SourceURL string `json:"sourceUrl"`
 	TotalSize int64  `json:"totalSize"`
-	// Kind 资源来源类型：torrent / local。
-	Kind string `json:"kind"`
 	// TaskState 下载任务生命周期状态。
 	TaskState string `json:"taskState"`
 	// LocalState 本地文件可用性状态。
@@ -116,9 +113,7 @@ func (s *ResourceService) ListCrawled(query CrawledResourceQuery) (*CrawledResou
 // toCrawledResourceItem 把数据库实体转换成前端展示用的条目。
 func toCrawledResourceItem(resource *models.Resource) CrawledResourceItem {
 	item := CrawledResourceItem{
-		ID:           resource.ID,
 		InfoHash:     resource.InfoHash,
-		Kind:         resource.Kind.String(),
 		TaskState:    resource.TaskState.String(),
 		LocalState:   resource.LocalState.String(),
 		DisplayState: resource.Display().String(),

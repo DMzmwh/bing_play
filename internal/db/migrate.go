@@ -35,16 +35,16 @@ func RunMigrate(db *sql.DB) error {
 	return nil
 }
 
-// NormalizeLocalResourcePaths 把历史本地视频记录的 local_path 统一为文件所在目录。
+// NormalizeLocalFilePaths 把历史本地视频记录的 local_path 统一为文件所在目录。
 //
 // 旧实现把完整文件路径写入 local_path，与种子记录（下载目录）语义不一致。
 // 旧记录的 file_name 恰好是 local_path 的最后一段，据此可安全地改为父目录。
 // 该操作幂等，可重复执行。
-func NormalizeLocalResourcePaths(db *gorm.DB) error {
-	var list []models.Resource
+func NormalizeLocalFilePaths(db *gorm.DB) error {
+	var list []models.LocalFileRecord
 	err := db.
 		Select("id, local_path, file_name").
-		Where("kind = ? AND local_path <> ''", int8(models.KindLocal)).
+		Where("(info_hash IS NULL OR info_hash = '') AND local_path <> ''").
 		Find(&list).
 		Error
 	if err != nil {
@@ -52,23 +52,23 @@ func NormalizeLocalResourcePaths(db *gorm.DB) error {
 	}
 
 	for i := range list {
-		resource := &list[i]
-		if resource.FileName == nil || *resource.FileName == "" {
+		local := &list[i]
+		if local.FileName == nil || *local.FileName == "" {
 			continue
 		}
 		// local_path 已经是目录时无需处理，规则天然幂等。
-		if info, statErr := os.Stat(resource.LocalPath); statErr == nil && info.IsDir() {
+		if info, statErr := os.Stat(local.LocalPath); statErr == nil && info.IsDir() {
 			continue
 		}
-		if filepath.Base(resource.LocalPath) != *resource.FileName {
+		if filepath.Base(local.LocalPath) != *local.FileName {
 			continue
 		}
-		dir := filepath.Dir(resource.LocalPath)
-		if dir == resource.LocalPath {
+		dir := filepath.Dir(local.LocalPath)
+		if dir == local.LocalPath {
 			continue
 		}
-		if err := db.Model(&models.Resource{}).
-			Where("id = ?", resource.ID).
+		if err := db.Model(&models.LocalFileRecord{}).
+			Where("id = ?", local.ID).
 			Update("local_path", dir).
 			Error; err != nil {
 			return err

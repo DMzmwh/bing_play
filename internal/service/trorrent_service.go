@@ -89,9 +89,9 @@ func (s *TorrentService) AddTorrent(path string) error {
 	return s.translateError(s.manager.AddTorrent(path))
 }
 
-// DownloadResources 按资源 ID 批量加入下载队列，用于种子资源页的多选下载。
-func (s *TorrentService) DownloadResources(ids []int64, priority int) (*torrentmgr.BatchDownloadResult, error) {
-	result, err := s.manager.DownloadResources(ids, priority)
+// DownloadResources 按 InfoHash 批量加入下载队列，用于种子资源页的多选下载。
+func (s *TorrentService) DownloadResources(infoHashes []string, priority int) (*torrentmgr.BatchDownloadResult, error) {
+	result, err := s.manager.DownloadResources(infoHashes, priority)
 	if err != nil {
 		return nil, s.translateError(err)
 	}

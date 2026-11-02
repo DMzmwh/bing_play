@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -28,6 +29,8 @@ const (
 	maxBodySize = 32 << 20
 	// EventChannelsUpdated 频道数据更新后广播的事件名。
 	EventChannelsUpdated = "tv:channels-updated"
+	// maxRefreshRetries 已成功同步过的订阅源在定时刷新失败后的最大重试次数。
+	maxRefreshRetries = 5
 )
 
 // 同步失败时写入 tv_sources.last_error 的错误码，前端按 i18n key 展示。
@@ -79,6 +82,10 @@ type Service struct {
 	// syncMu 串行化同步任务，避免启动同步与定时任务并发写库。
 	syncMu sync.Mutex
 
+	// syncFailures 记录各订阅源连续失败次数，用于定时刷新失败后的短间隔重试。
+	// 仅在持有 syncMu 时访问；成功同步后清零。
+	syncFailures map[int64]int
+
 	// cacheMu 保护内存快照。频道数据只在同步写库后整体替换，
 	// 前端读取时直接复用，避免每次请求都全量查库并逐行映射。
 	cacheMu    sync.RWMutex
@@ -90,13 +97,33 @@ type Service struct {
 	done   chan struct{}
 }
 
+// newSourceHTTPClient 创建订阅源请求客户端。
+//
+// 优先使用 IPv4：部分网络环境下 IPv6 到 CDN 的链路极慢，
+// 1MB 以上的订阅文件在超时前无法下载完成；IPv4 不可用时仍回退到 IPv6。
+func newSourceHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: requestTimeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				conn, err := dialer.DialContext(ctx, "tcp4", addr)
+				if err == nil {
+					return conn, nil
+				}
+				return dialer.DialContext(ctx, network, addr)
+			},
+		},
+	}
+}
+
 // NewService 创建电视直播服务并注册到 Fx 生命周期。
 func NewService(lc fx.Lifecycle, tvDAO *dao.TvDAO) *Service {
 	s := &Service{
-		dao: tvDAO,
-		client: &http.Client{
-			Timeout: requestTimeout,
-		},
+		dao:          tvDAO,
+		client:       newSourceHTTPClient(),
+		syncFailures: make(map[int64]int),
 	}
 
 	lc.Append(fx.Hook{
@@ -261,7 +288,8 @@ func (s *Service) rebuildSnapshotLocked() error {
 // SyncAll 立即同步全部启用的订阅源，返回同步后的状态。
 //
 // 单个订阅源失败不会中断其它订阅源，错误记录在对应 SourceStatus.LastError 中。
-// 距上次同步不足 RefreshInterval 的订阅源会被跳过，重启后也不会提前请求。
+// 距上次同步不足 RefreshInterval 的订阅源会被跳过，重启后也不会提前请求；
+// 但本地没有任何频道数据的订阅源会被强制重新拉取。
 func (s *Service) SyncAll(ctx context.Context) ([]SourceStatus, error) {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -271,12 +299,18 @@ func (s *Service) SyncAll(ctx context.Context) ([]SourceStatus, error) {
 		return nil, err
 	}
 
+	// 本地没有频道数据的源需要立即补拉，避免条件请求返回 304 后长期没有频道可用。
+	counts, err := s.dao.CountChannelsBySource()
+	if err != nil {
+		logError("电视频道数量读取失败", slog.Any("err", err))
+	}
+
 	now := time.Now()
 	for i := range sources {
 		if ctx.Err() != nil {
 			break
 		}
-		if !isSyncDue(&sources[i], now) {
+		if counts[sources[i].ID] > 0 && !isSyncDue(&sources[i], now) {
 			continue
 		}
 		s.syncSource(ctx, &sources[i])
@@ -293,7 +327,7 @@ func isSyncDue(source *models.TVSource, now time.Time) bool {
 	return now.Sub(*source.LastSyncAt) >= RefreshInterval
 }
 
-// minSyncDelay 异常情况下（如状态写回失败）的最小重试间隔，避免密集请求。
+// minSyncDelay 首次同步失败、定时刷新失败重试时的最小间隔，避免密集请求。
 const minSyncDelay = time.Minute
 
 // nextSyncDelay 返回距离最近一个订阅源到期还需等待的时间。
@@ -307,11 +341,17 @@ func (s *Service) nextSyncDelay() time.Duration {
 		return RefreshInterval
 	}
 
+	// 本地没有频道数据的源（如收到 304 但从未落库）需要按最短间隔继续补拉。
+	counts, err := s.dao.CountChannelsBySource()
+	if err != nil {
+		logError("电视频道数量读取失败", slog.Any("err", err))
+	}
+
 	now := time.Now()
 	delay := RefreshInterval
 	for i := range sources {
-		// 从未同步过的源应按最短间隔重试。
-		if sources[i].LastSyncAt == nil {
+		// 从未成功同步过或本地没有频道数据的源按最短间隔重试。
+		if sources[i].LastSyncAt == nil || counts[sources[i].ID] == 0 {
 			return minSyncDelay
 		}
 		remaining := RefreshInterval - now.Sub(*sources[i].LastSyncAt)
@@ -332,23 +372,29 @@ func (s *Service) syncSource(ctx context.Context, source *models.TVSource) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
 	if err != nil {
-		s.finishSync(source.ID, now, ErrorCodeFetchFailed, source.ETag, source.LastModified)
+		s.failSync(ctx, source, now, ErrorCodeFetchFailed, err.Error(), source.ETag, source.LastModified)
 		return
 	}
 	req.Header.Set("User-Agent", userAgent)
-	if source.ETag != "" {
-		req.Header.Set("If-None-Match", source.ETag)
+
+	// 本地没有频道数据时不带条件请求头：否则服务端可能返回 304，
+	// 同步会被记为成功，但频道表一直为空。
+	channelCount, err := s.dao.CountChannels(source.ID)
+	if err != nil {
+		logError("电视频道数量读取失败", slog.Int64("source_id", source.ID), slog.Any("err", err))
 	}
-	if source.LastModified != "" {
-		req.Header.Set("If-Modified-Since", source.LastModified)
+	if channelCount > 0 {
+		if source.ETag != "" {
+			req.Header.Set("If-None-Match", source.ETag)
+		}
+		if source.LastModified != "" {
+			req.Header.Set("If-Modified-Since", source.LastModified)
+		}
 	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		if ctx.Err() == nil {
-			logError("电视订阅源请求失败", slog.Int64("source_id", source.ID), slog.Any("err", err))
-		}
-		s.finishSync(source.ID, now, ErrorCodeFetchFailed, source.ETag, source.LastModified)
+		s.failSync(ctx, source, now, ErrorCodeFetchFailed, err.Error(), source.ETag, source.LastModified)
 		return
 	}
 	defer resp.Body.Close()
@@ -365,32 +411,28 @@ func (s *Service) syncSource(ctx context.Context, source *models.TVSource) {
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
 		// 内容未变化，只刷新同步时间。
-		s.finishSync(source.ID, time.Now(), "", etag, lastModified)
+		syncedAt := time.Now()
+		delete(s.syncFailures, source.ID)
+		s.finishSync(source.ID, &syncedAt, "", etag, lastModified)
 		return
 	case resp.StatusCode != http.StatusOK:
-		logError("电视订阅源返回异常状态",
-			slog.Int64("source_id", source.ID),
-			slog.Int("status", resp.StatusCode),
-		)
-		s.finishSync(source.ID, now, ErrorCodeStatus, etag, lastModified)
+		s.failSync(ctx, source, now, ErrorCodeStatus, resp.Status, etag, lastModified)
 		return
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodySize))
 	if err != nil {
-		logError("电视订阅源读取失败", slog.Int64("source_id", source.ID), slog.Any("err", err))
-		s.finishSync(source.ID, now, ErrorCodeFetchFailed, etag, lastModified)
+		s.failSync(ctx, source, now, ErrorCodeFetchFailed, err.Error(), etag, lastModified)
 		return
 	}
 
 	parsed, err := ParseM3U(bytes.NewReader(body))
 	if err != nil {
-		logError("电视订阅源解析失败", slog.Int64("source_id", source.ID), slog.Any("err", err))
-		s.finishSync(source.ID, now, ErrorCodeParse, etag, lastModified)
+		s.failSync(ctx, source, now, ErrorCodeParse, err.Error(), etag, lastModified)
 		return
 	}
 	if len(parsed) == 0 {
-		s.finishSync(source.ID, now, ErrorCodeEmpty, etag, lastModified)
+		s.failSync(ctx, source, now, ErrorCodeEmpty, "未解析到任何频道", etag, lastModified)
 		return
 	}
 
@@ -413,19 +455,68 @@ func (s *Service) syncSource(ctx context.Context, source *models.TVSource) {
 	}
 
 	if err := s.dao.ReplaceChannels(source.ID, channels); err != nil {
-		logError("电视频道写入失败", slog.Int64("source_id", source.ID), slog.Any("err", err))
-		s.finishSync(source.ID, now, ErrorCodeStore, etag, lastModified)
+		s.failSync(ctx, source, now, ErrorCodeStore, err.Error(), etag, lastModified)
 		return
 	}
 
-	s.finishSync(source.ID, now, "", etag, lastModified)
+	delete(s.syncFailures, source.ID)
+	s.finishSync(source.ID, &now, "", etag, lastModified)
 	emitChannelsUpdated(source.ID, len(channels))
 }
 
-// finishSync 写回订阅源同步状态。
+// failSync 写回同步失败状态并记录失败原因。
+//
+// 从未成功同步过的订阅源（如首次加载内置 IPTV 合集）失败后不写 last_sync_at，
+// 调度器会按 minSyncDelay 继续重试，直到首次拉取成功；
+// 已有成功记录的订阅源在定时刷新失败后同样按 minSyncDelay 重试，
+// 最多重试 maxRefreshRetries 次，仍失败才记录本次尝试时间并恢复 6 小时节奏。
+func (s *Service) failSync(
+	ctx context.Context,
+	source *models.TVSource,
+	attemptedAt time.Time,
+	errorCode string,
+	reason string,
+	etag string,
+	lastModified string,
+) {
+	if s.syncFailures == nil {
+		s.syncFailures = make(map[int64]int)
+	}
+
+	var syncedAt *time.Time
+	willRetry := true
+	switch {
+	case source.LastSyncAt == nil:
+		// 首次同步失败：保持 last_sync_at 为空，持续按最小间隔重试。
+	case s.syncFailures[source.ID] < maxRefreshRetries:
+		// 定时刷新失败：计数并保持旧同步时间，让调度器按最小间隔重试。
+		s.syncFailures[source.ID]++
+	default:
+		// 重试次数用尽：记录本次尝试时间，等待下一轮 6 小时刷新。
+		delete(s.syncFailures, source.ID)
+		syncedAt = &attemptedAt
+		willRetry = false
+	}
+
+	// 应用退出导致的请求中断不算同步失败，避免关闭时产生噪音日志。
+	if ctx.Err() == nil {
+		logError("电视订阅源同步失败",
+			slog.Int64("source_id", source.ID),
+			slog.String("name", source.Name),
+			slog.String("url", source.URL),
+			slog.String("error_code", errorCode),
+			slog.String("reason", reason),
+			slog.Bool("will_retry", willRetry),
+		)
+	}
+
+	s.finishSync(source.ID, syncedAt, errorCode, etag, lastModified)
+}
+
+// finishSync 写回订阅源同步状态。syncedAt 为 nil 时不更新 last_sync_at。
 func (s *Service) finishSync(
 	sourceID int64,
-	syncedAt time.Time,
+	syncedAt *time.Time,
 	lastError string,
 	etag string,
 	lastModified string,

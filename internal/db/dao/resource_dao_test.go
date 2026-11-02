@@ -29,48 +29,65 @@ func newTestResourceDAO(t *testing.T) *ResourceDAO {
 
 	err = db.Exec(`
 CREATE TABLE resources (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    info_hash       TEXT PRIMARY KEY,
     resource_name   TEXT,
-    file_name       TEXT,
     source_url      TEXT,
     cover_url       TEXT,
-    info_hash       TEXT,
-    torrent_path    TEXT,
     total_size      INTEGER DEFAULT 0,
-    local_path      TEXT,
-    file_size       INTEGER DEFAULT 0,
-    downloaded_size INTEGER DEFAULT 0,
-    mime_type       TEXT,
+    torrent_path    TEXT,
     resource_type   TEXT,
-    kind            INTEGER DEFAULT 0,
-    task_state      INTEGER DEFAULT 0,
-    local_state     INTEGER DEFAULT 0,
-    local_loss_reason INTEGER DEFAULT 0,
-    state_version   INTEGER DEFAULT 0,
-    attempt         INTEGER DEFAULT 0,
-    max_attempts    INTEGER DEFAULT 3,
-    error_code      TEXT DEFAULT '',
-    next_retry_at   DATETIME,
-    state_changed_at DATETIME,
-    verified_at     DATETIME,
-    local_checked_at DATETIME,
-    priority        INTEGER DEFAULT 0,
-    total_duration  INTEGER DEFAULT 0,
-    played          INTEGER DEFAULT 0,
-    play_progress   INTEGER DEFAULT 0,
-    play_count      INTEGER DEFAULT 0,
-    last_play_time  DATETIME,
-    finished        INTEGER DEFAULT 0,
     favorite        INTEGER DEFAULT 0,
     tags            TEXT,
     remark          TEXT,
     create_time     DATETIME,
     update_time     DATETIME
 );
-CREATE UNIQUE INDEX idx_resources_info_hash ON resources(info_hash) WHERE info_hash IS NOT NULL;
+
+CREATE TABLE download_tasks (
+    info_hash       TEXT PRIMARY KEY,
+    name            TEXT,
+    source_url      TEXT,
+    torrent_path    TEXT,
+    total_size      INTEGER DEFAULT 0,
+    task_state      INTEGER NOT NULL DEFAULT 0,
+    state_version   INTEGER NOT NULL DEFAULT 0,
+    attempt         INTEGER NOT NULL DEFAULT 0,
+    max_attempts    INTEGER NOT NULL DEFAULT 3,
+    error_code      TEXT NOT NULL DEFAULT '',
+    next_retry_at   DATETIME,
+    state_changed_at DATETIME,
+    priority        INTEGER DEFAULT 0,
+    downloaded_size INTEGER DEFAULT 0,
+    save_path       TEXT NOT NULL DEFAULT '',
+    update_time     DATETIME
+);
+
+CREATE TABLE local_files (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    info_hash         TEXT,
+    resource_name     TEXT,
+    local_state       INTEGER NOT NULL DEFAULT 0,
+    local_loss_reason INTEGER NOT NULL DEFAULT 0,
+    local_path        TEXT NOT NULL DEFAULT '',
+    file_name         TEXT,
+    file_size         INTEGER DEFAULT 0,
+    mime_type         TEXT,
+    verified_at       DATETIME,
+    local_checked_at  DATETIME,
+    total_duration    INTEGER DEFAULT 0,
+    played            INTEGER DEFAULT 0,
+    play_progress     INTEGER DEFAULT 0,
+    play_count        INTEGER DEFAULT 0,
+    last_play_time    DATETIME,
+    finished          INTEGER DEFAULT 0,
+    create_time       DATETIME,
+    update_time       DATETIME
+);
+
+CREATE INDEX idx_local_files_info_hash ON local_files(info_hash);
 `).Error
 	if err != nil {
-		t.Fatalf("创建 resources 表失败: %v", err)
+		t.Fatalf("创建资源三表失败: %v", err)
 	}
 
 	return NewResourceDAO(db)
@@ -95,7 +112,7 @@ func TestSaveCrawledResourcesDedup(t *testing.T) {
 	}
 
 	var count int64
-	if err := d.db.Model(&models.Resource{}).Count(&count).Error; err != nil {
+	if err := d.db.Model(&models.ResourceRecord{}).Count(&count).Error; err != nil {
 		t.Fatalf("统计失败: %v", err)
 	}
 	if count != 2 {
@@ -221,7 +238,7 @@ func TestGetByInfoHashAndIDs(t *testing.T) {
 		t.Fatalf("空 InfoHash 应返回 nil, got %v, err %v", empty, err)
 	}
 
-	list, err := d.GetByIDs([]int64{got.ID})
+	list, err := d.GetLocalFilesByIDs([]int64{got.ID})
 	if err != nil {
 		t.Fatalf("按 ID 查询失败: %v", err)
 	}
@@ -229,7 +246,7 @@ func TestGetByInfoHashAndIDs(t *testing.T) {
 		t.Fatalf("按 ID 查询结果 = %v", list)
 	}
 
-	none, err := d.GetByIDs(nil)
+	none, err := d.GetLocalFilesByIDs(nil)
 	if err != nil || none != nil {
 		t.Fatalf("空 ID 列表应返回 nil, got %v, err %v", none, err)
 	}
@@ -582,7 +599,7 @@ func TestDeleteByIDsAndGetByIDs(t *testing.T) {
 		t.Fatalf("写入后未生成主键")
 	}
 
-	rows, err := d.GetByIDs([]int64{resource.ID})
+	rows, err := d.GetLocalFilesByIDs([]int64{resource.ID})
 	if err != nil {
 		t.Fatalf("按 ID 批量查询失败: %v", err)
 	}
@@ -590,11 +607,11 @@ func TestDeleteByIDsAndGetByIDs(t *testing.T) {
 		t.Fatalf("按 ID 批量查询结果 = %v", rows)
 	}
 
-	if err := d.DeleteByIDs([]int64{resource.ID}); err != nil {
+	if err := d.DeleteLocalFilesByIDs([]int64{resource.ID}); err != nil {
 		t.Fatalf("批量删除记录失败: %v", err)
 	}
 
-	rows, err = d.GetByIDs([]int64{resource.ID})
+	rows, err = d.GetLocalFilesByIDs([]int64{resource.ID})
 	if err != nil {
 		t.Fatalf("删除后查询失败: %v", err)
 	}
@@ -603,8 +620,8 @@ func TestDeleteByIDsAndGetByIDs(t *testing.T) {
 	}
 }
 
-// TestResetToUndownloadedByIDs 种子资源批量重置为未下载，磁盘文件字段被清理。
-func TestResetToUndownloadedByIDs(t *testing.T) {
+// TestResetToUndownloadedByHashes 种子资源按 InfoHash 批量重置为未下载，磁盘文件字段被清理。
+func TestResetToUndownloadedByHashes(t *testing.T) {
 	d := newTestResourceDAO(t)
 
 	now := time.Now()
@@ -634,11 +651,11 @@ func TestResetToUndownloadedByIDs(t *testing.T) {
 		t.Fatalf("写入种子资源失败: %v", err)
 	}
 
-	if err := d.ResetToUndownloadedByIDs([]int64{resource.ID}, now); err != nil {
+	if err := d.ResetToUndownloadedByHashes([]string{resource.InfoHash}, now); err != nil {
 		t.Fatalf("批量重置失败: %v", err)
 	}
 
-	rows, err := d.GetByIDs([]int64{resource.ID})
+	rows, err := d.GetLocalFilesByIDs([]int64{resource.ID})
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("查询重置后的资源失败: %v, rows %v", err, rows)
 	}
