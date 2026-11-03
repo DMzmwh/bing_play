@@ -46,14 +46,15 @@
                                     :class="{ active: item.id === currentChannel?.id }"
                                     @click="playChannel(item)"
                                 >
-                                    <img
-                                        v-if="item.logo"
-                                        class="channel-logo"
-                                        :src="item.logo"
-                                        loading="lazy"
-                                        @error="onLogoError"
-                                    />
-                                    <span v-else class="channel-logo placeholder" />
+                                    <span class="channel-logo">
+                                        <img
+                                            v-if="item.logo"
+                                            :src="item.logo"
+                                            loading="lazy"
+                                            @load="onLogoLoad"
+                                            @error="onLogoError"
+                                        />
+                                    </span>
                                     <span class="name">{{ item.name }}</span>
                                 </div>
                             </template>
@@ -66,14 +67,15 @@
                                 :class="{ active: channel.id === currentChannel?.id }"
                                 @click="playChannel(channel)"
                             >
-                                <img
-                                    v-if="channel.logo"
-                                    class="channel-logo"
-                                    :src="channel.logo"
-                                    loading="lazy"
-                                    @error="onLogoError"
-                                />
-                                <span v-else class="channel-logo placeholder" />
+                                <span class="channel-logo">
+                                    <img
+                                        v-if="channel.logo"
+                                        :src="channel.logo"
+                                        loading="lazy"
+                                        @load="onLogoLoad"
+                                        @error="onLogoError"
+                                    />
+                                </span>
                                 <span class="name">{{ channel.name }}</span>
                             </div>
                         </div>
@@ -315,9 +317,16 @@ function playNextChannel() {
     playChannel(list[index + 1])
 }
 
+/** 台标加载失败时隐藏图片，露出底层的默认台标 */
 function onLogoError(event: Event) {
     const img = event.target as HTMLImageElement
-    img.style.display = 'none'
+    img.style.visibility = 'hidden'
+}
+
+/** 虚拟列表会复用节点，新台标加载成功后恢复显示 */
+function onLogoLoad(event: Event) {
+    const img = event.target as HTMLImageElement
+    img.style.visibility = 'visible'
 }
 
 function onPlayerError(_error: Error, failedUrl?: string) {
@@ -591,16 +600,23 @@ onBeforeUnmount(() => {
     color: var(--app-text);
 }
 
+/* 默认台标在懒加载完成前以及加载失败时显示，加载成功后由 img 覆盖 */
 .channel-logo {
+    position: relative;
     width: 22px;
     height: 22px;
     flex-shrink: 0;
-    object-fit: contain;
+    overflow: hidden;
     border-radius: 4px;
+    background: var(--app-hover) url("../assets/tv-default.svg") center / contain no-repeat;
 }
 
-.channel-logo.placeholder {
-    background: var(--app-hover);
+.channel-logo img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
 /* center */
