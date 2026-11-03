@@ -18,6 +18,14 @@ import (
 
 var DB *gorm.DB
 
+// sqliteDSNParams 打开驱动连接时使用的默认参数。
+//
+// _time_format=datetime 让 time.Time 以 "2006-01-02 15:04:05" 写入，
+// 避免默认的 time.Time.String() 把单调时钟后缀 "m=+..." 也存进数据库；
+// _timezone=Local 保证不带时区的文本按本地时区解析，写入与读取的瞬时一致；
+// _texttotime/_inttotime 则让 DATETIME 列按 time.Time 读取。
+const sqliteDSNParams = "?_time_format=datetime&_timezone=Local&_texttotime=1&_inttotime=1"
+
 func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
 	/////////////////////////////////////////////////////
 	// 原生 sql.DB
@@ -34,9 +42,11 @@ func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
 		panic(err)
 	}
 
+	// 直接打开驱动连接时，libtnb/sqlite 的 DSN 默认参数不会生效，
+	// 需显式带上 sqliteDSNParams 要求按 SQLite 格式写入时间。
 	sqlDB, err := sql.Open(
 		"sqlite",
-		dbPath,
+		dbPath+sqliteDSNParams,
 	)
 	if err != nil {
 		panic(err)

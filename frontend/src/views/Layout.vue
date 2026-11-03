@@ -76,7 +76,7 @@ const tabs = computed(() => [
     { label: t("nav.download"), path: "/download" },
     { label: t("nav.library"), path: "/library" },
     { label: t("nav.resources"), path: "/resources" },
-    { label: t("nav.find"), path: "/find" },
+    // { label: t("nav.find"), path: "/find" },
     { label: t("nav.settings"), path: "/settings" },
 ]);
 

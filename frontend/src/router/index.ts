@@ -5,10 +5,10 @@ import Play from "@/views/Play.vue";
 import Resources from "@/views/Resources.vue";
 import Settings from "@/views/Settings.vue";
 import Tv from "@/views/Tv.vue";
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory } from "vue-router";
 
 export default createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     { path: "/", redirect: "/play" },
     { path: "/play", component: Play },
