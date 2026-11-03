@@ -52,13 +52,19 @@ const naiveDateLocale = computed(
   () => naiveLocaleMap[i18nState.lang.toLowerCase()]?.[1] ?? dateEnUS
 );
 
+/** 本次运行只提示一次更新，避免定时检查时同一版本或不同版本反复弹窗 */
+let updateNotified = false;
+
 const cleanup = Events.On(
     Updater.Events.UpdateAvailable,
     (event) => {
-        console.log('update available:', event.data.version);
+        if (updateNotified) return;
+        updateNotified = true;
+        const version = String(event.data?.version ?? '');
+        console.log('update available:', version);
         // 事件可能早于语言包/设置加载完成，等加载后再取文案
         void Promise.all([loadMessages(), loadSettings()]).then(() => {
-            alert(t('update.available', { Version: event.data.version }))
+            alert(t('update.available', { Version: version }))
         })
     }
 );
