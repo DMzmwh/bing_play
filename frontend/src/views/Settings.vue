@@ -64,13 +64,26 @@
                                         @update:value="(value) => setDraft(item.key, value ? 'true' : 'false')"
                                     />
 
-                                    <n-select
+                                    <div
                                         v-else-if="item.type === 'select'"
-                                        class="control-select"
-                                        :value="draft[item.key]"
-                                        :options="selectOptions(item)"
-                                        @update:value="(value) => onSelectChange(item.key, value)"
-                                    />
+                                        class="control-inline"
+                                    >
+                                        <n-select
+                                            class="control-select"
+                                            :value="draft[item.key]"
+                                            :options="selectOptions(item)"
+                                            @update:value="(value) => onSelectChange(item.key, value)"
+                                        />
+                                        <n-button
+                                            v-if="item.key === SettingKeys.language"
+                                            secondary
+                                            :loading="exportingLocale"
+                                            :disabled="saving"
+                                            @click="onExportLocaleTemplate"
+                                        >
+                                            {{ t('settings.export_locale_template') }}
+                                        </n-button>
+                                    </div>
 
                                     <n-input-number
                                         v-else-if="item.type === 'number'"
@@ -129,6 +142,7 @@ import {
     SelectDownloadDir,
     ValidateDownloadDir
 } from '../../bindings/github.com/bing/bing-play/internal/service/settingsservice'
+import { ExportLocaleTemplate } from '../../bindings/github.com/bing/bing-play/internal/i18n/i18nservice'
 import type { SettingOption } from '../../bindings/github.com/bing/bing-play/internal/service/models'
 import {
     SettingKeys,
@@ -164,6 +178,8 @@ const ready = computed(() => settingsState.loaded)
 const loadFailed = ref(false)
 /** 目录选择器是否正在打开，避免重复点击 */
 const pickingDir = ref(false)
+/** 语言模板是否正在导出 */
+const exportingLocale = ref(false)
 
 const categories = computed(() => settingsState.categories)
 
@@ -224,6 +240,21 @@ function onSelectChange(key: string, value: string | number | null) {
             console.warn('切换语言失败:', error)
             message.error(t('settings.save_failed'))
         })
+    }
+}
+
+/** 导出当前语言包作为扩展模板，用户可据此新增或覆盖文案 */
+async function onExportLocaleTemplate() {
+    if (exportingLocale.value) return
+    exportingLocale.value = true
+    try {
+        const path = await ExportLocaleTemplate()
+        message.success(t('settings.export_locale_success', { Path: path }))
+    } catch (error) {
+        console.warn('导出语言模板失败:', error)
+        message.error(t('settings.export_locale_failed'))
+    } finally {
+        exportingLocale.value = false
     }
 }
 
@@ -530,6 +561,12 @@ onBeforeUnmount(() => {
 .control-select,
 .control-number {
     width: 180px;
+}
+
+.control-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .control-path {

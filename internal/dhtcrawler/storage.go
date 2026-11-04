@@ -13,20 +13,25 @@ import (
 	"github.com/DMzmwh/bing-dhtcrawler/storage"
 )
 
-// 爬虫数据在 resources 下的相对目录。
-const crawlerDataDir = "crawler"
+// 爬虫数据在应用数据目录下的相对路径。
+// 安装到 Program Files 后 resources 目录通常不可写，因此归档数据统一放到用户数据目录。
+const crawlerDataDir = "data/crawler"
 
 // FileStorage 实现 bing-dhtcrawler 的 storage.Storage，
-// 把种子元数据、DHT 来源统计追加写入 resources/crawler 下的 JSON Lines 文件。
+// 把种子元数据、DHT 来源统计追加写入 data/crawler 下的 JSON Lines 文件。
 type FileStorage struct {
 	dir string
 	mu  sync.Mutex
 }
 
-func NewFileStorage(resourceDir string) (*FileStorage, error) {
-	abs, err := filepath.Abs(resolveResourceDir(resourceDir))
+// NewFileStorage 在应用数据目录下创建爬虫数据目录。
+func NewFileStorage(dataDir string) (*FileStorage, error) {
+	if dataDir == "" {
+		dataDir = "."
+	}
+	abs, err := filepath.Abs(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("解析资源目录失败: %w", err)
+		return nil, fmt.Errorf("解析数据目录失败: %w", err)
 	}
 
 	dir := filepath.Join(abs, crawlerDataDir)
@@ -128,27 +133,4 @@ func (s *FileStorage) WriteNodes(records []NodeRecord) error {
 	}
 
 	return nil
-}
-
-// resolveResourceDir 返回可用的资源目录：
-// 配置目录存在就用它，否则退回可执行文件同级目录，最后再退回相对路径。
-func resolveResourceDir(configured string) string {
-	if configured == "" {
-		configured = "resources"
-	}
-
-	if abs, err := filepath.Abs(configured); err == nil {
-		if st, err := os.Stat(abs); err == nil && st.IsDir() {
-			return abs
-		}
-	}
-
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), filepath.Base(configured))
-		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
-			return candidate
-		}
-	}
-
-	return configured
 }

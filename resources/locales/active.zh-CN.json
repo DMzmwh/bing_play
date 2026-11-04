@@ -671,6 +671,18 @@
     "description": "系统设置 - 说明：界面语言",
     "other": "选择应用界面与播放器控件使用的语言"
   },
+  "settings.export_locale_template": {
+    "description": "系统设置 - 按钮：导出语言模板",
+    "other": "导出语言模板"
+  },
+  "settings.export_locale_success": {
+    "description": "系统设置 - 提示：语言模板已导出，参数 Path 为导出路径",
+    "other": "语言模板已导出：{{.Path}}"
+  },
+  "settings.export_locale_failed": {
+    "description": "系统设置 - 提示：导出语言模板失败",
+    "other": "导出语言模板失败"
+  },
   "settings.item.download_dir": {
     "description": "系统设置 - 设置项：下载目录",
     "other": "下载目录"

@@ -11,7 +11,6 @@ import (
 
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/db/dao"
-	"github.com/bing/bing-play/internal/i18n"
 	"github.com/bing/bing-play/internal/settings"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -122,6 +121,8 @@ type SettingsService struct {
 	download   DownloadDirApplier
 	// defaultDownloadDir 应用初始下载目录，用作设置项默认值
 	defaultDownloadDir string
+	// localeDir 用户扩展语言包目录，位于用户数据目录下
+	localeDir string
 }
 
 // NewSettingsService 创建 SettingsService。
@@ -133,6 +134,7 @@ func NewSettingsService(settingDAO *dao.AppSettingDAO, crawler CrawlerReloader, 
 	}
 	if cfg != nil {
 		s.defaultDownloadDir = absPath(cfg.DownloadDir)
+		s.localeDir = filepath.Join(cfg.DataDir, "resources", "locales")
 	}
 	// 启动时把已保存的下载目录应用到运行时，避免重启后回到默认目录
 	s.applyStoredDownloadDir()
@@ -178,7 +180,7 @@ func (s *SettingsService) GetSettings() (*SettingsSnapshot, error) {
 
 // SaveSettings 校验并保存设置，全部通过后按分组事务写入。
 func (s *SettingsService) SaveSettings(values map[string]string) (*SettingsSaveResult, error) {
-	defs := settingDefs(s.defaultDownloadDir)
+	defs := settingDefs(s.defaultDownloadDir, s.localeDir)
 	known := make(map[string]struct{}, len(defs))
 	for _, def := range defs {
 		known[def.key] = struct{}{}
@@ -265,7 +267,7 @@ func (s *SettingsService) SaveSettings(values map[string]string) (*SettingsSaveR
 
 // ResetSettings 把所有设置项写回默认值。
 func (s *SettingsService) ResetSettings() (*SettingsSnapshot, error) {
-	defs := settingDefs(s.defaultDownloadDir)
+	defs := settingDefs(s.defaultDownloadDir, s.localeDir)
 
 	stored, err := s.settingDAO.GetAll()
 	if err != nil {
@@ -338,7 +340,7 @@ func (s *SettingsService) reloadCrawlerIfChanged(before, after, submitted map[st
 
 // buildSnapshot 合并已保存值与默认值，非法的已保存值回落到默认值。
 func (s *SettingsService) buildSnapshot(stored map[string]string) *SettingsSnapshot {
-	defs := settingDefs(s.defaultDownloadDir)
+	defs := settingDefs(s.defaultDownloadDir, s.localeDir)
 	storedValues := readSettingValues(stored, defs)
 
 	items := make([]SettingItem, 0, len(defs))
@@ -375,7 +377,7 @@ func (s *SettingsService) buildSnapshot(stored map[string]string) *SettingsSnaps
 }
 
 // settingDefs 定义全部设置项。同组设置（crawler / download / ui）共用一条 JSON 记录。
-func settingDefs(defaultDownloadDir string) []settingDef {
+func settingDefs(defaultDownloadDir, localeDir string) []settingDef {
 	return []settingDef{
 		{
 			key:          settings.KeyLanguage,
@@ -384,7 +386,7 @@ func settingDefs(defaultDownloadDir string) []settingDef {
 			label:        "settings.item.language",
 			help:         "settings.help.language",
 			defaultValue: "en",
-			options:      loadLanguageOptions(),
+			options:      loadLanguageOptions(localeDir),
 			valueType:    "string",
 		},
 		{
@@ -708,9 +710,9 @@ func (s *SettingsService) SelectDownloadDir(title string, current string) (strin
 	return absPath(selected), nil
 }
 
-// loadLanguageOptions 从语言目录读取可选语言，读取失败时使用内置兜底列表。
-func loadLanguageOptions() []SettingOption {
-	entries, err := os.ReadDir(i18n.LocaleDir)
+// loadLanguageOptions 从用户语言目录读取可选语言，读取失败时使用内置兜底列表。
+func loadLanguageOptions(localeDir string) []SettingOption {
+	entries, err := os.ReadDir(localeDir)
 	if err != nil {
 		return fallbackLanguageOptions()
 	}
@@ -718,11 +720,12 @@ func loadLanguageOptions() []SettingOption {
 	options := make([]SettingOption, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "active.") || !strings.HasSuffix(name, ".json") {
+		if entry.IsDir() || !strings.HasPrefix(name, "active.") || !strings.HasSuffix(name, ".json") ||
+			strings.HasSuffix(name, ".example.json") {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(i18n.LocaleDir, name))
+		data, err := os.ReadFile(filepath.Join(localeDir, name))
 		if err != nil {
 			continue
 		}

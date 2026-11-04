@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"time"
+
+	"github.com/bing/bing-play/internal/assets"
 	"github.com/bing/bing-play/internal/container"
 	"github.com/bing/bing-play/internal/logger"
 	"github.com/bing/bing-play/internal/server/handler"
-	"time"
 
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/db"
@@ -31,7 +33,7 @@ type App struct {
 // AppIcon 窗口图标 PNG 数据，由 main 从 build/appicon.png 嵌入后传入。
 type AppIcon []byte
 
-func NewApp(assets embed.FS, icon AppIcon) *App {
+func NewApp(assets embed.FS, resFS assets.FS, icon AppIcon) *App {
 	a := &App{}
 	a.fxApp = fx.New(
 		// =========================
@@ -65,6 +67,7 @@ func NewApp(assets embed.FS, icon AppIcon) *App {
 		// Wails assets
 		// =========================
 		fx.Supply(assets),
+		fx.Supply(resFS),
 		fx.Supply(icon),
 		// 强制让后台服务进入 Fx 生命周期
 		fx.Invoke(func(

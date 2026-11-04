@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bing/bing-play/internal/assets"
 	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/logger"
 
@@ -26,7 +27,7 @@ var DB *gorm.DB
 // _texttotime/_inttotime 则让 DATETIME 列按 time.Time 读取。
 const sqliteDSNParams = "?_time_format=datetime&_timezone=Local&_texttotime=1&_inttotime=1"
 
-func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
+func InitDB(lc fx.Lifecycle, cfg *config.Config, resFS assets.FS) *gorm.DB {
 	/////////////////////////////////////////////////////
 	// 原生 sql.DB
 	/////////////////////////////////////////////////////
@@ -73,7 +74,7 @@ func InitDB(lc fx.Lifecycle, cfg *config.Config) *gorm.DB {
 	/////////////////////////////////////////////////////
 	// migration
 	/////////////////////////////////////////////////////
-	err = RunMigrate(sqlDB)
+	err = RunMigrate(sqlDB, resFS)
 	if err != nil {
 		logger.Error.Error("发生错误", slog.Any("err", err))
 		panic(err)

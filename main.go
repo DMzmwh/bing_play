@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"github.com/bing/bing-play/app"
+	resourceassets "github.com/bing/bing-play/internal/assets"
 	"github.com/bing/bing-play/internal/logger"
 	"os"
 	"path/filepath"
@@ -17,6 +18,13 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// 内置语言包与数据库迁移，保证自动更新只替换 exe 时也能拿到最新文案和迁移。
+// 语言包仍允许运行目录下的 resources/locales 覆盖，迁移只使用内置版本。
+//
+//go:embed resources/locales/*.json
+//go:embed resources/migrations/*.sql
+var resourceAssets embed.FS
 
 //go:embed build/appicon.png
 var appIcon []byte
@@ -46,7 +54,7 @@ func main() {
 		}
 	}()
 
-	bz := app.NewApp(assets, app.AppIcon(appIcon))
+	bz := app.NewApp(assets, resourceassets.FS(resourceAssets), app.AppIcon(appIcon))
 	if err := bz.Run(); err != nil {
 		logPath, _ := filepath.Abs("app.log")
 		_ = os.WriteFile(

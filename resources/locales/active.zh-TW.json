@@ -671,6 +671,18 @@
     "description": "系統設定 - 說明：介面語言",
     "other": "選擇應用介面與播放器控制項使用的語言"
   },
+  "settings.export_locale_template": {
+    "description": "系統設定 - 按鈕：匯出語言範本",
+    "other": "匯出語言範本"
+  },
+  "settings.export_locale_success": {
+    "description": "系統設定 - 提示：語言範本已匯出，參數 Path 為匯出路徑",
+    "other": "語言範本已匯出：{{.Path}}"
+  },
+  "settings.export_locale_failed": {
+    "description": "系統設定 - 提示：匯出語言範本失敗",
+    "other": "匯出語言範本失敗"
+  },
   "settings.item.download_dir": {
     "description": "系統設定 - 設定項：下載目錄",
     "other": "下載目錄"

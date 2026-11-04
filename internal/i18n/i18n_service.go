@@ -3,19 +3,28 @@ package i18n
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	pathpkg "path"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
+	"github.com/bing/bing-play/internal/assets"
+	"github.com/bing/bing-play/internal/config"
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/logger"
 	i18nlib "github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
 )
 
-const LocaleDir = "./resources/locales"
-const SettingKeyLanguage = "language"
+const (
+	// localeSubDir 用户扩展语言包在数据目录下的相对路径。
+	localeSubDir     = "resources/locales"
+	SettingKeyLanguage = "language"
+)
 
 // PlayerLocaleKey ArtPlayer 自身文案在语言文件中的分组名，其内容直接使用 ArtPlayer 的原生 key
 const PlayerLocaleKey = "art.player"
@@ -25,7 +34,10 @@ type I18nService struct {
 	lang        string
 	defaultLang string
 	settingDAO  *dao.AppSettingDAO
-	mu          sync.RWMutex
+	resFS       assets.FS
+	// localeDir 用户扩展语言包目录，位于用户数据目录下，安装目录通常不可写。
+	localeDir string
+	mu        sync.RWMutex
 }
 
 type LocaleInfo struct {
@@ -35,8 +47,12 @@ type LocaleInfo struct {
 	Filename   string `json:"filename"`
 }
 
-func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
+func NewI18nService(settingDAO *dao.AppSettingDAO, resFS assets.FS, cfg *config.Config) (*I18nService, error) {
 	defaultLang := "en"
+	localeDir := localeSubDir
+	if cfg != nil && cfg.DataDir != "" {
+		localeDir = filepath.Join(cfg.DataDir, localeSubDir)
+	}
 	bundle := i18nlib.NewBundle(
 		language.English,
 	)
@@ -61,7 +77,8 @@ func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
 	)
 	err := loadLocales(
 		bundle,
-		LocaleDir,
+		resFS,
+		localeDir,
 	)
 
 	if err != nil {
@@ -73,41 +90,51 @@ func NewI18nService(settingDAO *dao.AppSettingDAO) (*I18nService, error) {
 		defaultLang: defaultLang,
 		lang:        savedLang,
 		settingDAO:  settingDAO,
+		resFS:       resFS,
+		localeDir:   localeDir,
 	}, nil
 }
 
-func loadLocales(bundle *i18nlib.Bundle, dir string) error {
-	files, err := os.ReadDir(dir)
-
+// loadLocales 先加载内置语言包，再加载用户数据目录下的同名/新增文件。
+// 外部文件后加载，因此可以覆盖内置文案或新增语言；缺失的消息仍由内置文件兜底。
+func loadLocales(bundle *i18nlib.Bundle, resFS assets.FS, localeDir string) error {
+	entries, err := fs.ReadDir(resFS, assets.LocalesDir)
 	if err != nil {
-		return fmt.Errorf(
-			"read locales: %w",
-			err,
-		)
+		return fmt.Errorf("read embedded locales: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !isLocaleFile(entry.Name()) {
+			continue
+		}
+		if _, err := bundle.LoadMessageFileFS(resFS, pathpkg.Join(assets.LocalesDir, entry.Name())); err != nil {
+			return err
+		}
+	}
+
+	// 外部语言包可选，不存在时只使用内置版本。
+	files, err := os.ReadDir(localeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read locales: %w", err)
 	}
 
 	for _, file := range files {
-		if file.IsDir() {
+		if file.IsDir() || !isLocaleFile(file.Name()) {
 			continue
 		}
-		//if filepath.Ext(file.Name()) != ".toml" {
-		//	continue
-		//}
-		// 修改：只加载 .json 文件
-		if filepath.Ext(file.Name()) != ".json" {
-			continue
-		}
-		_, err := bundle.LoadMessageFile(
-			filepath.Join(
-				dir,
-				file.Name(),
-			),
-		)
-		if err != nil {
+		if _, err := bundle.LoadMessageFile(filepath.Join(localeDir, file.Name())); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// isLocaleFile 判断是否为可加载的语言包；导出的模板文件名以 .example.json 结尾，不参与加载。
+func isLocaleFile(name string) bool {
+	return pathpkg.Ext(name) == ".json" && !strings.HasSuffix(name, ".example.json")
 }
 
 func (s *I18nService) T(id string, data map[string]interface{}) string {
@@ -172,28 +199,80 @@ func (s *I18nService) SetLang(lang string) {
 	}
 }
 
-// GetLangList 获取locales目录下全部json语言文件名
-func (s *I18nService) GetLangList() ([]string, error) {
-	files, err := filepath.Glob(filepath.Join(LocaleDir, "*.json"))
+// localeFilenames 返回内置与外部语言文件的并集，按文件名去重并排序。
+// onlyActive 为 true 时只返回 active.*.json。
+func (s *I18nService) localeFilenames(onlyActive bool) ([]string, error) {
+	merged := make(map[string]struct{})
+
+	entries, err := fs.ReadDir(s.resFS, assets.LocalesDir)
 	if err != nil {
+		return nil, fmt.Errorf("read embedded locales: %w", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !isLocaleFile(name) {
+			continue
+		}
+		if onlyActive && !strings.HasPrefix(name, "active.") {
+			continue
+		}
+		merged[name] = struct{}{}
+	}
+
+	files, err := os.ReadDir(s.localeDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read locales: %w", err)
+	}
+	for _, file := range files {
+		name := file.Name()
+		if file.IsDir() || !isLocaleFile(name) {
+			continue
+		}
+		if onlyActive && !strings.HasPrefix(name, "active.") {
+			continue
+		}
+		merged[name] = struct{}{}
+	}
+
+	names := make([]string, 0, len(merged))
+	for name := range merged {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// readLocaleFile 读取语言文件：用户数据目录下的文件优先，不存在时回退到内置版本。
+func (s *I18nService) readLocaleFile(filename string) ([]byte, error) {
+	if filename == "" || filename != filepath.Base(filename) {
+		return nil, fmt.Errorf("非法文件路径")
+	}
+
+	data, err := os.ReadFile(filepath.Join(s.localeDir, filename))
+	if err == nil {
+		return data, nil
+	}
+	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	var res []string
-	for _, f := range files {
-		res = append(res, filepath.Base(f))
-	}
-	return res, nil
+
+	return fs.ReadFile(s.resFS, pathpkg.Join(assets.LocalesDir, filename))
+}
+
+// GetLangList 获取全部 json 语言文件名（内置 + 外部）。
+func (s *I18nService) GetLangList() ([]string, error) {
+	return s.localeFilenames(false)
 }
 
 func (s *I18nService) GetLangListV2() ([]LocaleInfo, error) {
-	files, err := filepath.Glob(filepath.Join(LocaleDir, "active.*.json"))
+	files, err := s.localeFilenames(true)
 	if err != nil {
 		return nil, err
 	}
 
 	locales := make([]LocaleInfo, 0, len(files))
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		data, err := s.readLocaleFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("读取语言文件 %s: %w", file, err)
 		}
@@ -214,32 +293,22 @@ func (s *I18nService) GetLangListV2() ([]LocaleInfo, error) {
 			continue
 		}
 
-		info.Filename = filepath.Base(file)
+		info.Filename = file
 		locales = append(locales, info)
 	}
 
 	return locales, nil
 }
 
-// LoadLangFileToFlat 读取go-i18n嵌套json，转为扁平json字符串返回给vue-i18n
+// LoadLangFileToFlat 读取go-i18n嵌套json，转为扁平json字符串返回给vue-i18n。
+// 外部语言文件优先，缺失时回退到内置版本。
 func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
-	dir := LocaleDir
-	fullPath := filepath.Join(dir, filename)
-
-	// 防路径穿越
-	absTarget, err := filepath.Abs(fullPath)
+	data, err := s.readLocaleFile(filename)
 	if err != nil {
 		return "", err
 	}
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	if filepath.Dir(absTarget) != absDir {
-		return "", fmt.Errorf("非法文件路径")
-	}
 
-	flat, err := loadFlatFile(absTarget)
+	flat, err := loadFlatData(data)
 	if err != nil {
 		return "", err
 	}
@@ -251,14 +320,51 @@ func (s *I18nService) LoadLangFileToFlat(filename string) (string, error) {
 	return string(flatData), nil
 }
 
-// loadFlatFile 读取单个语言文件，转为 key -> 文本 的扁平表；
-// locale、art.player 这类非 go-i18n 消息结构的分组会被跳过
-func loadFlatFile(path string) (map[string]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+// ExportLocaleTemplate 把当前语言的内置语言包导出为模板文件，供用户参考格式并扩展翻译。
+// 文件写到用户数据目录的 resources/locales 下，文件名形如 active.zh-CN.example.json。
+func (s *I18nService) ExportLocaleTemplate() (string, error) {
+	s.mu.RLock()
+	lang := s.lang
+	s.mu.RUnlock()
+
+	lang = strings.TrimSpace(lang)
+	if lang == "" || lang != filepath.Base(lang) {
+		return "", fmt.Errorf("非法的语言代码")
 	}
 
+	filename := "active." + lang + ".json"
+	var data []byte
+	var err error
+	// 优先使用内置文件，保证导出的模板包含最新、完整的 key。
+	if data, err = fs.ReadFile(s.resFS, pathpkg.Join(assets.LocalesDir, filename)); err != nil {
+		if data, err = os.ReadFile(filepath.Join(s.localeDir, filename)); err != nil {
+			return "", fmt.Errorf("读取语言文件 %s: %w", filename, err)
+		}
+	}
+
+	var content any
+	if err := json.Unmarshal(data, &content); err != nil {
+		return "", fmt.Errorf("解析语言文件 %s: %w", filename, err)
+	}
+	pretty, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("格式化语言文件 %s: %w", filename, err)
+	}
+
+	if err := os.MkdirAll(s.localeDir, 0o755); err != nil {
+		return "", fmt.Errorf("创建语言目录失败: %w", err)
+	}
+
+	dest := filepath.Join(s.localeDir, "active."+lang+".example.json")
+	if err := os.WriteFile(dest, append(pretty, '\n'), 0o644); err != nil {
+		return "", fmt.Errorf("写入语言模板失败: %w", err)
+	}
+	return dest, nil
+}
+
+// loadFlatData 把语言文件内容转为 key -> 文本 的扁平表；
+// locale、art.player 这类非 go-i18n 消息结构的分组会被跳过
+func loadFlatData(data []byte) (map[string]string, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("解析翻译文件失败: %w", err)
@@ -285,7 +391,7 @@ func (s *I18nService) GetPlayerLang() (map[string]string, error) {
 	useLang := s.lang
 	s.mu.RUnlock()
 
-	data, err := os.ReadFile(filepath.Join(LocaleDir, fmt.Sprintf("active.%s.json", useLang)))
+	data, err := s.readLocaleFile(fmt.Sprintf("active.%s.json", useLang))
 	if err != nil {
 		return nil, err
 	}

@@ -12,15 +12,15 @@ import (
 	"github.com/DMzmwh/bing-dhtcrawler/storage"
 )
 
-func TestFileStorageWritesUnderResourceDir(t *testing.T) {
-	resourceDir := t.TempDir()
+func TestFileStorageWritesUnderDataDir(t *testing.T) {
+	dataDir := t.TempDir()
 
-	s, err := NewFileStorage(resourceDir)
+	s, err := NewFileStorage(dataDir)
 	if err != nil {
 		t.Fatalf("NewFileStorage: %v", err)
 	}
 
-	expectedDir := filepath.Join(resourceDir, crawlerDataDir)
+	expectedDir := filepath.Join(dataDir, crawlerDataDir)
 	if s.Dir() != expectedDir {
 		t.Fatalf("数据目录 = %s, 期望 %s", s.Dir(), expectedDir)
 	}
@@ -78,16 +78,16 @@ func TestFileStorageWritesUnderResourceDir(t *testing.T) {
 	}
 }
 
-func TestFileStorageMissingResourceDirIsReported(t *testing.T) {
+func TestFileStorageUnwritableDataDirIsReported(t *testing.T) {
 	base := t.TempDir()
-	blocked := filepath.Join(base, "resources")
+	blocked := filepath.Join(base, "data")
 
 	// 用同名文件占位，让 MkdirAll 必然失败，验证错误会被返回而不是静默忽略。
 	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
 		t.Fatalf("准备文件: %v", err)
 	}
 
-	if _, err := NewFileStorage(blocked); err == nil {
+	if _, err := NewFileStorage(base); err == nil {
 		t.Fatal("期望返回错误，实际为 nil")
 	}
 }

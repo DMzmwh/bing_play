@@ -6,7 +6,7 @@ type Config struct {
 	DBPath      string
 	DownloadDir string
 
-	// ResourceDir 是 resources 目录，爬虫数据也落在这里。
+	// ResourceDir 是 resources 目录（静态资源）。
 	ResourceDir string
 	// CrawlerEnabled 控制启动时是否自动拉起 DHT 爬虫。
 	CrawlerEnabled bool

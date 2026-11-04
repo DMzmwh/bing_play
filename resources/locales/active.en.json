@@ -671,6 +671,18 @@
     "description": "system settings - help: interface language",
     "other": "Choose the language used by the application and player controls"
   },
+  "settings.export_locale_template": {
+    "description": "system settings - button: export language template",
+    "other": "Export Language Template"
+  },
+  "settings.export_locale_success": {
+    "description": "system settings - notice: language template exported, Path is the output path",
+    "other": "Language template exported: {{.Path}}"
+  },
+  "settings.export_locale_failed": {
+    "description": "system settings - notice: failed to export language template",
+    "other": "Failed to export language template"
+  },
   "settings.item.download_dir": {
     "description": "system settings - item: download directory",
     "other": "Download Directory"
