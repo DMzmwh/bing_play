@@ -342,18 +342,31 @@ function onPlayerError(_error: Error, failedUrl?: string) {
  * - 放宽分片加载超时与重试次数，适应不稳定的直播源
  */
 const hlsLiveConfig = {
+    // 是否启用低延迟模式（LL-HLS）。普通 IPTV 不支持 LL-HLS，关闭避免额外开销
     lowLatencyMode: false,
+    // 直播同步点：播放位置落后直播边缘的分片数。3 个分片 ≈ 18 秒延迟（按每片 6s 计）
     liveSyncDurationCount: 3,
+    // 最大允许延迟：超过这个分片数会强制 seek 回同步点，避免越播越慢
     liveMaxLatencyDurationCount: 10,
+    // 向前缓冲最大时长（秒），预加载多少秒视频
     maxBufferLength: 20,
+    // 向前缓冲的硬上限（秒），防止缓冲无限增长
     maxMaxBufferLength: 30,
+    // 向后保留缓冲时长（秒），播放位置之前的分片保留多久，控制内存
     backBufferLength: 30,
+    // 主列表（master m3u8）单次加载超时（毫秒）
     manifestLoadingTimeOut: 5000,
+    // 主列表加载失败重试次数，0 表示不重试，失败立即切代理
     manifestLoadingMaxRetry: 0,
+    // 子列表（某个清晰度的 m3u8）单次加载超时（毫秒）
     levelLoadingTimeOut: 5000,
+    // 子列表加载失败重试次数，1 表示重试 1 次
     levelLoadingMaxRetry: 1,
+    // 单个视频分片（ts/fmp4）单次加载超时（毫秒），分片较大给足时间
     fragLoadingTimeOut: 20000,
+    // 单个分片加载失败重试次数
     fragLoadingMaxRetry: 6,
+    // 根据播放器窗口大小限制最高清晰度，省带宽
     capLevelToPlayerSize: true
 }
 
