@@ -21,7 +21,11 @@
 
             <div class="list">
                 <div v-for="group in groups" :key="group.title" class="group">
-                    <div class="group-title" @click="toggleGroup(group.title)">
+                    <div
+                        class="group-title"
+                        :class="{ 'has-active': isPlayingGroup(group.title) }"
+                        @click="toggleGroup(group.title)"
+                    >
                         <n-icon
                             size="14"
                             :component="isGroupExpanded(group.title) ? CaretDown : CaretForward"
@@ -275,6 +279,13 @@ function tryProxyFallback(failedUrl: string): boolean {
 /** 频道分组是否展开 */
 function isGroupExpanded(title: string) {
     return searching.value || expandedGroup.value === title
+}
+
+/** 当前播放频道是否属于该分组；分组名缺失时归入「未分组」，与 groups 计算保持一致 */
+function isPlayingGroup(title: string) {
+    const channel = currentChannel.value
+    if (!channel) return false
+    return (channel.groupTitle || t('tv.group_unknown')) === title
 }
 
 /** 展开指定分组，同时收起其他分组 */
@@ -650,6 +661,12 @@ onBeforeUnmount(() => {
     color: var(--app-text-muted);
 }
 
+/* 包含正在播放频道的分组：标题用强调色 + 左侧竖条，折叠后也能定位 */
+.group-title.has-active {
+    color: var(--app-accent, #3b82f6);
+    box-shadow: inset 3px 0 0 var(--app-accent, #3b82f6);
+}
+
 .group-name {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -685,9 +702,15 @@ onBeforeUnmount(() => {
     background: var(--app-hover-row);
 }
 
+/* 正在播放的频道：左侧强调色竖条 + 强调色底 + 加粗，保证深色主题下也一眼可见 */
 .channel.active {
-    background: var(--app-active-row);
+    background: var(--app-accent-soft, rgba(59, 130, 246, 0.12));
     color: var(--app-text);
+    box-shadow: inset 3px 0 0 var(--app-accent, #3b82f6);
+}
+
+.channel.active .name {
+    font-weight: 600;
 }
 
 /* 默认台标在懒加载完成前以及加载失败时显示，加载成功后由 img 覆盖 */
