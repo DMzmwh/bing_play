@@ -107,6 +107,10 @@
     "description": "電視直播 - 未分組頻道",
     "other": "未分組"
   },
+  "tv.audio_only": {
+    "description": "電視直播 - 純音頻（電台）頻道的播放提示",
+    "other": "此頻道為音頻直播，沒有畫面"
+  },
   "tv.error.fetch_failed": {
     "description": "電視直播 - 訂閱源請求失敗",
     "other": "訂閱源請求失敗"

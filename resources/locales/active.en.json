@@ -107,6 +107,10 @@
     "description": "live TV - channels without a group",
     "other": "Ungrouped"
   },
+  "tv.audio_only": {
+    "description": "live TV - hint shown for audio-only (radio) channels",
+    "other": "This channel is an audio-only stream with no video"
+  },
   "tv.error.fetch_failed": {
     "description": "live TV - subscription request failed",
     "other": "Failed to fetch the subscription source"

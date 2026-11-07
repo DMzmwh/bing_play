@@ -107,6 +107,10 @@
     "description": "电视直播 - 未分组频道",
     "other": "未分组"
   },
+  "tv.audio_only": {
+    "description": "电视直播 - 纯音频（电台）频道的播放提示",
+    "other": "该频道为音频直播，没有画面"
+  },
   "tv.error.fetch_failed": {
     "description": "电视直播 - 订阅源请求失败",
     "other": "订阅源请求失败"

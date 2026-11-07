@@ -117,6 +117,10 @@
                     {{ t('tv.empty_hint') }}
                 </div>
             </div>
+            <!-- 纯音频直播源：提示用户这是电台类节目，避免误以为画面故障 -->
+            <div v-if="currentUrl && audioOnly" class="audio-only-tip">
+                {{ t('tv.audio_only') }}
+            </div>
             <div v-if="errorMsg" class="error-tip">{{ errorMsg }}</div>
         </div>
     </div>
@@ -148,7 +152,7 @@ import type {
 const TV_CHANNELS_UPDATED_EVENT = 'tv:channels-updated'
 
 /** ArtPlayer 实例上挂载的 hls 实例，切换频道时先销毁旧的 */
-type PlayerWithHls = Artplayer & { hls?: Hls }
+type PlayerWithHls = Artplayer & { hls?: Hls; audioOnlyCleanup?: () => void }
 
 /** 本地 Go HTTP 服务地址，与 Play.vue 保持一致 */
 const API_BASE = 'http://127.0.0.1:9090'
@@ -165,6 +169,8 @@ const sources = ref<SourceStatus[]>([])
 const keyword = ref('')
 /** 当前播放的频道 */
 const currentChannel = ref<ChannelItem | null>(null)
+/** 当前流是否只有音频（电台类源），用于在播放区给出提示 */
+const audioOnly = ref(false)
 /** 播放错误提示 */
 const errorMsg = ref('')
 /** 当前展开的分组，同一时间只展开一个，避免频道过多时创建过多 DOM */
@@ -403,12 +409,28 @@ const playerOptions = computed(() => {
             m3u8(video: HTMLVideoElement, url: string, art: Artplayer) {
                 const player = art as PlayerWithHls
                 player.hls?.destroy()
+                // 切换频道时清掉上一路流的音频检测监听，并先复位提示
+                player.audioOnlyCleanup?.()
+                player.audioOnlyCleanup = undefined
+                audioOnly.value = false
 
                 if (Hls.isSupported()) {
                     const hls = new Hls(hlsLiveConfig)
                     player.hls = hls
                     hls.loadSource(url)
                     hls.attachMedia(video)
+
+                    // 元数据/可播放后按分辨率判断是否为纯音频流（电台源没有视频轨道）
+                    const refreshAudioOnly = () => {
+                        audioOnly.value = video.videoWidth === 0 && video.videoHeight === 0
+                    }
+                    video.addEventListener('loadedmetadata', refreshAudioOnly)
+                    video.addEventListener('canplay', refreshAudioOnly)
+                    const cleanupAudioOnly = () => {
+                        video.removeEventListener('loadedmetadata', refreshAudioOnly)
+                        video.removeEventListener('canplay', refreshAudioOnly)
+                    }
+                    player.audioOnlyCleanup = cleanupAudioOnly
 
                     // 直连时连续分片加载失败就切代理；成功加载后清零
                     let loadErrorCount = 0
@@ -472,13 +494,22 @@ const playerOptions = computed(() => {
                         }
                     })
 
-                    art.on('destroy', () => hls.destroy())
+                    art.on('destroy', () => {
+                        cleanupAudioOnly()
+                        hls.destroy()
+                    })
                     return
                 }
 
                 // Safari 等原生支持 HLS 的环境直接交给 video
                 if (video.canPlayType('application/vnd.apple.mpegurl')) {
                     video.src = url
+                    const refreshAudioOnly = () => {
+                        audioOnly.value = video.videoWidth === 0 && video.videoHeight === 0
+                    }
+                    video.addEventListener('loadedmetadata', refreshAudioOnly)
+                    player.audioOnlyCleanup = () =>
+                        video.removeEventListener('loadedmetadata', refreshAudioOnly)
                     return
                 }
 
@@ -795,5 +826,17 @@ onBeforeUnmount(() => {
     z-index: 10;
     color: #fff;
     background: rgba(220, 38, 38, 0.85);
+}
+
+/* 纯音频源提示：播放区顶部的小标签，不遮挡播放控件 */
+.audio-only-tip {
+    position: absolute;
+    left: 50%;
+    top: 16px;
+    transform: translateX(-50%);
+    font-size: 12px;
+    pointer-events: none;
+    z-index: 10;
+    color: var(--app-text);
 }
 </style>
