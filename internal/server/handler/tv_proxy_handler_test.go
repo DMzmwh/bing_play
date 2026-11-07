@@ -133,6 +133,100 @@ func TestTVProxyRewritesPlaylistAndStreamsSegment(t *testing.T) {
 	}
 }
 
+// 播放列表地址带 token 查询串时，相对分片地址应保留该查询串，避免分片 403。
+func TestTVProxyPreservesPlaylistQuery(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/live/index.m3u8" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		_, _ = io.WriteString(w, "#EXTM3U\n#EXTINF:4.0,\nseg-1.ts\n")
+	}))
+	defer upstream.Close()
+
+	base, closeProxy := newTestProxy(t)
+	defer closeProxy()
+
+	playlistURL := proxySrc(base, upstream.URL+"/live/index.m3u8?token=abc")
+	resp, err := http.Get(playlistURL)
+	if err != nil {
+		t.Fatalf("请求代理播放列表失败: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读取代理播放列表失败: %v", err)
+	}
+
+	want := proxyRefPath(upstream.URL + "/live/seg-1.ts?token=abc")
+	if !strings.Contains(string(body), want) {
+		t.Errorf("分片地址未保留 token，播放列表:\n%s\nwant: %s", body, want)
+	}
+}
+
+// 上游在播放列表响应里下发的 Cookie 应保留，后续分片请求依赖它。
+func TestTVProxyKeepsSessionCookie(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/live/index.m3u8":
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Path: "/"})
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			_, _ = io.WriteString(w, "#EXTM3U\n#EXTINF:4.0,\nseg-1.ts\n")
+		case "/live/seg-1.ts":
+			cookie, err := r.Cookie("sid")
+			if err != nil || cookie.Value != "ok" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			_, _ = io.WriteString(w, "SEGMENT")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	base, closeProxy := newTestProxy(t)
+	defer closeProxy()
+
+	resp, err := http.Get(proxySrc(base, upstream.URL+"/live/index.m3u8"))
+	if err != nil {
+		t.Fatalf("请求代理播放列表失败: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("读取代理播放列表失败: %v", err)
+	}
+
+	var segmentPath string
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			segmentPath = line
+		}
+	}
+	if segmentPath == "" {
+		t.Fatalf("未找到分片地址，播放列表:\n%s", body)
+	}
+
+	segmentResp, err := http.Get(base + segmentPath)
+	if err != nil {
+		t.Fatalf("请求代理分片失败: %v", err)
+	}
+	defer segmentResp.Body.Close()
+	if segmentResp.StatusCode != http.StatusOK {
+		t.Fatalf("分片状态码 = %d, want 200（Cookie 未透传）", segmentResp.StatusCode)
+	}
+	segmentBody, err := io.ReadAll(segmentResp.Body)
+	if err != nil {
+		t.Fatalf("读取代理分片失败: %v", err)
+	}
+	if string(segmentBody) != "SEGMENT" {
+		t.Fatalf("分片内容 = %q, want SEGMENT", segmentBody)
+	}
+}
+
 func TestTVProxyRejectsInvalidRequests(t *testing.T) {
 	base, closeProxy := newTestProxy(t)
 	defer closeProxy()

@@ -328,7 +328,7 @@ func isSyncDue(source *models.TVSource, now time.Time) bool {
 }
 
 // minSyncDelay 首次同步失败、定时刷新失败重试时的最小间隔，避免密集请求。
-const minSyncDelay = time.Minute
+const minSyncDelay = 10 * time.Second
 
 // nextSyncDelay 返回距离最近一个订阅源到期还需等待的时间。
 func (s *Service) nextSyncDelay() time.Duration {

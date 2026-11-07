@@ -12,7 +12,7 @@ const (
 	// CheckInterval 是后台自动检查更新的间隔。
 	CheckInterval = 30 * time.Minute
 	// Repository 是 GitHub 更新仓库。
-	Repository = "wailsapp/updater-demo"
+	Repository = "DMzmwh/bing_play"
 	// ChecksumAsset 是 Release 中的校验文件。
 	ChecksumAsset = "SHA256SUMS"
 )

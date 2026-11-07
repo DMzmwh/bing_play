@@ -2,12 +2,15 @@ package handler
 
 import (
 	"io"
+	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/bing/bing-play/internal/logger"
 	"github.com/bing/bing-play/internal/server"
 )
 
@@ -32,8 +35,28 @@ type TVProxyHandler struct {
 
 // NewTVProxyHandler 创建代理 handler。
 func NewTVProxyHandler() *TVProxyHandler {
+	// Cookie Jar 用于保留上游在播放列表响应里下发的会话 Cookie，
+	// 部分直播源后续分片请求依赖该 Cookie，否则会返回 403 导致播放卡顿。
+	jar, _ := cookiejar.New(nil)
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
 	return &TVProxyHandler{
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: &http.Client{
+			Transport: transport,
+			Jar:       jar,
+			Timeout:   60 * time.Second,
+		},
 	}
 }
 
@@ -47,6 +70,14 @@ func TVProxyRoute(h *TVProxyHandler) server.RouteOut {
 // RegisterRoutes 注册代理路由。
 func (h *TVProxyHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/tv/proxy", h.Proxy)
+}
+
+// proxyWarn 记录代理上游异常；logger.App 未初始化时（如单元测试）静默跳过。
+func proxyWarn(msg string, args ...any) {
+	if logger.App == nil {
+		return
+	}
+	logger.App.Warn(msg, args...)
 }
 
 // Proxy 拉取订阅源地址并转发；src 为经过 URL 编码的原始地址。
@@ -87,12 +118,14 @@ func (h *TVProxyHandler) Proxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.client.Do(req)
 	if err != nil {
+		proxyWarn("TV Proxy 请求上游失败", "host", target.Host, "path", target.Path, "err", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		proxyWarn("TV Proxy 上游返回异常状态", "host", target.Host, "path", target.Path, "status", resp.StatusCode)
 		w.WriteHeader(resp.StatusCode)
 		return
 	}
@@ -176,5 +209,11 @@ func proxyRef(base *url.URL, raw string) string {
 		return raw
 	}
 	abs := base.ResolveReference(ref)
+	// 部分直播源把 token 放在播放列表的查询串里，而分片使用相对地址；
+	// 按 URL 规范解析后 query 会被丢弃，分片请求会因缺少 token 返回 403。
+	// 仅在同源且分片自身没有 query 时沿用播放列表 query，避免把 token 带到第三方 CDN。
+	if abs.RawQuery == "" && base.RawQuery != "" && abs.Host == base.Host {
+		abs.RawQuery = base.RawQuery
+	}
 	return "/tv/proxy?src=" + url.QueryEscape(abs.String())
 }

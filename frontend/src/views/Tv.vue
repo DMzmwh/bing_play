@@ -335,6 +335,28 @@ function onPlayerError(_error: Error, failedUrl?: string) {
     errorMsg.value = t('tv.play_failed')
 }
 
+/**
+ * hls.js 直播参数：
+ * - 关闭低延迟模式，普通 IPTV 不是 LL-HLS，开启反而更容易 stall
+ * - liveMaxLatencyDurationCount 限制落后分片数，长时间卡顿后自动追到直播边缘
+ * - 放宽分片加载超时与重试次数，适应不稳定的直播源
+ */
+const hlsLiveConfig = {
+    lowLatencyMode: false,
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 10,
+    maxBufferLength: 20,
+    maxMaxBufferLength: 30,
+    backBufferLength: 30,
+    manifestLoadingTimeOut: 5000,
+    manifestLoadingMaxRetry: 0,
+    levelLoadingTimeOut: 5000,
+    levelLoadingMaxRetry: 1,
+    fragLoadingTimeOut: 20000,
+    fragLoadingMaxRetry: 6,
+    capLevelToPlayerSize: true
+}
+
 /** ArtPlayer 配置；直播源统一按 m3u8 交给 hls.js 播放 */
 const playerOptions = computed(() => {
     const lang = i18nState.lang.toLowerCase()
@@ -359,18 +381,73 @@ const playerOptions = computed(() => {
                 player.hls?.destroy()
 
                 if (Hls.isSupported()) {
-                    const hls = new Hls()
+                    const hls = new Hls(hlsLiveConfig)
                     player.hls = hls
                     hls.loadSource(url)
                     hls.attachMedia(video)
+
+                    // 直连时连续分片加载失败就切代理；成功加载后清零
+                    let loadErrorCount = 0
+                    // 代理模式下网络错误的重试次数
+                    let proxyRetryCount = 0
+                    // 媒体错误恢复次数，避免无限 recover
+                    let mediaRecoverCount = 0
+
+                    hls.on(Hls.Events.FRAG_LOADED, () => {
+                        loadErrorCount = 0
+                        proxyRetryCount = 0
+                    })
+                    hls.on(Hls.Events.LEVEL_LOADED, () => {
+                        loadErrorCount = 0
+                    })
+
                     hls.on(Hls.Events.ERROR, (_event, data) => {
-                        if (!data?.fatal) return
-                        // 直连的网络类错误（跨域、403、超时等）自动切换本地代理重试
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && tryProxyFallback(url)) {
+                        if (!data) return
+
+                        if (data.fatal) {
+                            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                                // 直连的网络类错误（跨域、403、超时等）自动切换本地代理重试
+                                if (tryProxyFallback(url)) return
+                                // 已在代理模式：延迟后重新加载，最多两次
+                                if (proxyRetryCount < 2) {
+                                    proxyRetryCount += 1
+                                    const delay = proxyRetryCount * 1000
+                                    window.setTimeout(() => {
+                                        if (player.hls === hls) hls.startLoad()
+                                    }, delay)
+                                    return
+                                }
+                            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                                if (mediaRecoverCount < 2) {
+                                    mediaRecoverCount += 1
+                                    hls.recoverMediaError()
+                                    return
+                                }
+                            }
+                            errorMsg.value = t('tv.play_failed')
                             return
                         }
-                        errorMsg.value = t('tv.play_failed')
+
+                        // 非致命的网络错误：
+                        // - 主列表/子列表加载失败：直播源基本是跨域/403，重试无意义，立即切代理
+                        // - 分片加载失败：单个分片可能偶发失败，累计 3 次再切代理
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            if (
+                                data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                                data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR
+                            ) {
+                                tryProxyFallback(url)
+                                return
+                            }
+                            if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+                                loadErrorCount += 1
+                                if (loadErrorCount >= 3 && tryProxyFallback(url)) {
+                                    loadErrorCount = 0
+                                }
+                            }
+                        }
                     })
+
                     art.on('destroy', () => hls.destroy())
                     return
                 }
