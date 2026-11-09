@@ -271,6 +271,7 @@ func (d *ResourceDAO) ListByTaskStates(states []models.TaskState) ([]models.Reso
 }
 
 // listTasksWhere 查询任务表并按 hash 批量补齐资源与本地文件。
+// download_tasks 主表数据已在步骤①拿到，不重复查第二次。
 func (d *ResourceDAO) listTasksWhere(states []models.TaskState, order string) ([]models.Resource, error) {
 	var tasks []models.DownloadTaskRecord
 	query := d.db.Model(&models.DownloadTaskRecord{})
@@ -293,7 +294,7 @@ func (d *ResourceDAO) listTasksWhere(states []models.TaskState, order string) ([
 	for i := range tasks {
 		hashes = append(hashes, tasks[i].InfoHash)
 	}
-	resourceMap, _, localMap, err := d.loadAll(hashes)
+	resourceMap, localMap, err := d.loadResourcesAndLocals(hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +306,23 @@ func (d *ResourceDAO) listTasksWhere(states []models.TaskState, order string) ([
 		out = append(out, *models.Assemble(hash, resourceMap[hash], task, localMap[hash]))
 	}
 	return out, nil
+}
+
+// DeleteTaskByHash 按 InfoHash 真实删除下载任务产生的数据记录。
+// 只删 download_tasks 和 local_files，resources 原始爬虫目录保留不动。
+func (d *ResourceDAO) DeleteTaskByHash(infoHash string) error {
+	if infoHash == "" {
+		return nil
+	}
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("info_hash = ?", infoHash).Delete(&models.DownloadTaskRecord{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("info_hash = ?", infoHash).Delete(&models.LocalFileRecord{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // DeleteLocalFilesByIDs 按本地文件主键批量删除记录，不删除磁盘文件。
@@ -386,10 +404,13 @@ func (d *ResourceDAO) GetLocalFile(id string) (*models.Resource, error) {
 // 返回三类记录：
 //   - 本地视频：local_files.info_hash 为 NULL 且文件齐全；
 //   - 已完成种子：download_tasks 完成且本地文件齐全；
-//   - 下载中 / 校验中的种子：支持边下边播。
+//   - 下载中 / 校验中的种子：已下载进度达到 playableMinRatio 以上（支持边下边播，
+//     metadata 刚拿到、piece 为 0 的任务暂不进入播放列表）。
+const playableMinRatio = 0.1
+
 func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 	var active []models.DownloadTaskRecord
-	if err := d.db.Select("info_hash").
+	if err := d.db.Select("info_hash", "downloaded_size", "total_size").
 		Where("task_state IN ?", int8Slice([]models.TaskState{models.TaskDownloading, models.TaskVerifying})).
 		Find(&active).Error; err != nil {
 		return nil, err
@@ -398,6 +419,10 @@ func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 	activeHashes := make([]string, 0, len(active))
 	for i := range active {
 		hash := active[i].InfoHash
+		// 下载中的任务：progress = downloaded_size / total_size >= 10% 才进播放列表
+		if !hasEnoughProgress(&active[i]) {
+			continue
+		}
 		activeSet[hash] = struct{}{}
 		activeHashes = append(activeHashes, hash)
 	}
@@ -505,7 +530,7 @@ var crawledSortColumns = map[string]string{
 // ListCrawled 分页查询爬虫抓取到的资源。
 // 只返回带 InfoHash 的目录记录；本地视频不在 resources 表中。
 func (d *ResourceDAO) ListCrawled(q CrawledListQuery) ([]models.Resource, int64, error) {
-	base := d.db.Model(&models.ResourceRecord{}).Where("info_hash IS NOT NULL AND info_hash <> ''")
+	base := d.db.Model(&models.ResourceRecord{})
 
 	if keyword := strings.TrimSpace(q.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
@@ -849,6 +874,23 @@ func (d *ResourceDAO) loadResourceAndTask(infoHashes []string) (
 	return resourceMap, taskMap, nil
 }
 
+// loadResourcesAndLocals 只读取资源元数据与本地文件，下载任务由调用方已持有。
+func (d *ResourceDAO) loadResourcesAndLocals(infoHashes []string) (
+	map[string]*models.ResourceRecord,
+	map[string]*models.LocalFileRecord,
+	error,
+) {
+	resourceMap, err := d.loadResources(infoHashes)
+	if err != nil {
+		return nil, nil, err
+	}
+	localMap, err := d.loadLocals(infoHashes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resourceMap, localMap, nil
+}
+
 // loadTaskAndLocal 只读取下载任务与本地文件，资源元数据由调用方提供。
 func (d *ResourceDAO) loadTaskAndLocal(infoHashes []string) (
 	map[string]*models.DownloadTaskRecord,
@@ -970,4 +1012,16 @@ func createTimeOf(resource *models.Resource) time.Time {
 		return time.Time{}
 	}
 	return *resource.CreateTime
+}
+
+// hasEnoughProgress 判断下载任务是否达到 playableMinRatio 门槛。
+// downloaded_size 或 total_size 为 nil / 0 时返回 false（metadata 刚拿到、piece 为 0）。
+func hasEnoughProgress(task *models.DownloadTaskRecord) bool {
+	if task == nil || task.DownloadedSize == nil || task.TotalSize == nil {
+		return false
+	}
+	if *task.TotalSize <= 0 {
+		return false
+	}
+	return float64(*task.DownloadedSize)/float64(*task.TotalSize) >= playableMinRatio
 }

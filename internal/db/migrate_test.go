@@ -144,8 +144,8 @@ func TestBaselineMigration(t *testing.T) {
 		t.Fatalf("内置订阅源 = %q %q enabled=%d", name, url, enabled)
 	}
 
-	if err := m.Steps(-1); err != nil {
-		t.Fatalf("回滚基线迁移失败: %v", err)
+	if err := m.Down(); err != nil {
+		t.Fatalf("回滚全部迁移失败: %v", err)
 	}
 	for _, name := range tables {
 		if got := countTable(name); got != 0 {

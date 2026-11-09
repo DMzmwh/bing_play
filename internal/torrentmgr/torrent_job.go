@@ -49,6 +49,10 @@ type TorrentJob struct {
 	lastProgress  time.Time // 上一次"有新增数据"的时间戳，用于停滞检测
 	lastPersistAt time.Time // 上一次进度落库时间
 
+	// stallStartAt 第一次进入 stall 状态的时间，零值表示当前不在 stall 中。
+	// stall 期间如果 BytesCompleted 涨了或 ConnectedSeeders > 0 则清零恢复。
+	stallStartAt time.Time
+
 	downloadSpeed int64   // 瞬时下载速度，单位B/s，业务层采样计算得出
 	uploadSpeed   int64   // 瞬时上传做种速度，单位B/s，业务层采样计算得出
 	progress      float64 // 下载进度，范围 0-100
@@ -58,6 +62,7 @@ type TorrentJob struct {
 	progressInterval time.Duration // 进度采样间隔
 	persistInterval  time.Duration // 进度落库间隔
 	stallTimeout     time.Duration // 无进展判定超时
+	deadSeedWindow   time.Duration // stall 后死种观察窗口时长
 
 	notify func(*vo.TorrentJobVO) // 进度 / 完成时推送事件
 	// persist CAS 落库快照，返回是否写入成功；allowRetry 为 true 时
@@ -87,10 +92,12 @@ func (job *TorrentJob) bind(
 	job.progressInterval = cfg.ProgressInterval
 	job.persistInterval = cfg.PersistInterval
 	job.stallTimeout = cfg.StallTimeout
+	job.deadSeedWindow = cfg.DeadSeedWindow
 	job.notify = notify
 	job.persist = persist
 	job.clearPieces = clearPieces
 	job.persistedVersion = job.job.StateVersion
+	job.stallStartAt = time.Time{} // 确保初始状态不在 stall 中
 }
 
 // Apply 在任务上执行一次状态机流转，并按规则完成落库 / 推送 / 释放资源等副作用。
@@ -197,8 +204,9 @@ func (job *TorrentJob) StartDownload() jobOutcome {
 	for {
 		select {
 		case <-ticker.C:
-			if job.monitorProgress() {
-				return outcomeStalled
+			_, dead := job.monitorProgress()
+			if dead {
+				return outcomeDeadSeed
 			}
 		case <-job.ctx.Done():
 			if job.currentState() == models.TaskPaused {
@@ -212,25 +220,31 @@ func (job *TorrentJob) StartDownload() jobOutcome {
 	}
 }
 
-// monitorProgress 采样一次进度、推送事件并按落库间隔持久化，返回 true 表示任务已停滞需要重试。
-func (job *TorrentJob) monitorProgress() bool {
+// monitorProgress 采样一次进度、推送事件并按落库间隔持久化。
+// 返回值：
+//   - stalled：是否处于 stall 状态（连续 stallTimeout 时间无新增字节）
+//   - dead：是否判定为死种（stall 持续超过 deadSeedWindow 且期间无恢复）
+//
+// 恢复条件：stall 期间只要 BytesCompleted 涨了 或 ConnectedSeeders > 0，
+// 就清零 stallStartAt 回到正常状态。
+func (job *TorrentJob) monitorProgress() (stalled bool, dead bool) {
 	job.mu.Lock()
 
 	tt := job.torrent
 	if tt == nil {
 		job.mu.Unlock()
-		return false
+		return false, false
 	}
 	info := tt.Info()
 	if info == nil {
 		job.mu.Unlock()
-		return false
+		return false, false
 	}
 
 	total := info.TotalLength()
 	if total <= 0 {
 		job.mu.Unlock()
-		return false
+		return false, false
 	}
 	completed := tt.BytesCompleted()
 	stats := tt.Stats()
@@ -268,17 +282,37 @@ func (job *TorrentJob) monitorProgress() bool {
 		job.lastCompleted = completed
 		job.lastProgress = now
 	}
-	stalled := completed < total && job.stallTimeout > 0 && now.Sub(job.lastProgress) >= job.stallTimeout
+	stalled = completed < total && job.stallTimeout > 0 && now.Sub(job.lastProgress) >= job.stallTimeout
+
+	// 死种观察窗口逻辑：
+	//   stall + 无完整 seeder 持续观察，窗口内有恢复则清零，窗口过了仍没活判定死种。
+	connectedSeeders := stats.ConnectedSeeders
+	if !stalled || connectedSeeders > 0 {
+		// 恢复：有新字节 或 来了完整 seeder
+		if !job.stallStartAt.IsZero() {
+			job.stallStartAt = time.Time{}
+		}
+	} else {
+		// 持续 stall，记录/推进观察窗口
+		if job.stallStartAt.IsZero() {
+			job.stallStartAt = now // 第一次进入 stall
+		} else if job.deadSeedWindow > 0 && now.Sub(job.stallStartAt) >= job.deadSeedWindow {
+			dead = true // 窗口过了仍没恢复，判定死种
+		}
+	}
 
 	shouldPersist := job.persist != nil && job.persistInterval > 0 && now.Sub(job.lastPersistAt) >= job.persistInterval
 	if shouldPersist {
 		job.lastPersistAt = now
 	}
-	infoHash := job.job.InfoHash
+	name := job.job.InfoHash
+	if job.job.ResourceName != nil && *job.job.ResourceName != "" {
+		name = *job.job.ResourceName
+	}
 	progress := job.progress
 	speed := job.downloadSpeed
 	upload := job.uploadSpeed
-	peers := stats.ActivePeers
+	stallStartAt := job.stallStartAt // 快照，下面 unlock 后使用
 	job.mu.Unlock()
 
 	if shouldPersist && !stalled {
@@ -288,19 +322,37 @@ func (job *TorrentJob) monitorProgress() bool {
 
 	job.push(job.ToVO())
 
-	// 默认不输出进度明细；排查下载问题时把 1 != 1 改成 1 == 1 即可开启。
+	// 默认不输出进度明细；排查下载问题时把 1 != 1
 	if 1 != 1 {
+		stallInfo := "正常"
+		if stalled {
+			if !stallStartAt.IsZero() {
+				stallInfo = fmt.Sprintf("stalled %s", now.Sub(stallStartAt).Round(time.Second))
+			} else {
+				stallInfo = "stalled"
+			}
+		} else if !stallStartAt.IsZero() {
+			stallInfo = fmt.Sprintf("恢复(曾 stall %s)", now.Sub(stallStartAt).Round(time.Second))
+		}
 		logger.Torrent.Debug(fmt.Sprintf(
-			infoHash+"进度: %.2f%% | 已完成: %.2f MB | 下载速度: %.2f MB/s | 上传速度: %.2f MB/s | Peer: %d\n",
+			"[%s] 进度: %.2f%% | 完成: %.2f MB | 下载: %.2f MB/s | 上传: %.2f MB/s | stall: %s | "+
+				"peers[总:%d 活跃:%d 完整种子:%d 握手中:%d 半开:%d pieces:%d]",
+			name,
 			progress,
 			float64(completed)/1024/1024,
 			float64(speed)/1024/1024,
 			float64(upload)/1024/1024,
-			peers,
+			stallInfo,
+			stats.TotalPeers,
+			stats.ActivePeers,
+			stats.ConnectedSeeders,
+			stats.PendingPeers,
+			stats.HalfOpenPeers,
+			stats.PiecesComplete,
 		))
 	}
 
-	return stalled
+	return stalled, dead
 }
 
 // markCompleted 标记下载完成并校验落盘结果。

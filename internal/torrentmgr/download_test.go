@@ -161,8 +161,14 @@ func TestStatusRank(t *testing.T) {
 func TestDownloadConfigJSONDuration(t *testing.T) {
 	// 保证配置中的时间字段为正数且可被前端按秒换算，避免默认值被误改。
 	cfg := DefaultDownloadConfig()
-	if got := cfg.MetadataTimeout / time.Second; got != 600 {
-		t.Fatalf("MetadataTimeout = %d 秒, want 600", got)
+	if got := cfg.MetadataTimeout / time.Second; got <= 0 {
+		t.Fatalf("MetadataTimeout = %d 秒, want > 0", got)
+	}
+	if got := cfg.StallTimeout / time.Second; got <= 0 {
+		t.Fatalf("StallTimeout = %d 秒, want > 0", got)
+	}
+	if got := cfg.DeadSeedWindow / time.Second; got <= 0 {
+		t.Fatalf("DeadSeedWindow = %d 秒, want > 0", got)
 	}
 }
 

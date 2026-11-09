@@ -720,52 +720,58 @@ func uniqueResourceIDs(ids []int64) []int64 {
 	return out
 }
 
-// CancelJob 取消任务：恢复到「未下载」状态，并清理磁盘上的下载痕迹。
+// CancelJob 取消任务：停止下载、释放 Torrent、清理磁盘痕迹、删除数据库记录。
+// 只删 download_tasks + local_files，resources 原始爬虫目录保留不动。
 func (m *TorrentManager) CancelJob(infoHash string) error {
 	job, err := m.GetJob(infoHash)
 	if err != nil {
 		return m.cancelResourceByHash(infoHash)
 	}
 
-	// Torrent 在取消后会被释放，先取出清理磁盘所需的元信息、保存目录与主文件名。
+	// 先取出清理磁盘所需的元信息与下载路径，再停下载、删记录。
 	var (
 		info     *metainfo.Info
 		baseDir  string
 		fileName string
 	)
-	job.mu.RLock()
+	job.mu.Lock()
 	if job.job != nil {
 		baseDir = job.job.LocalPath
 		if job.job.FileName != nil {
 			fileName = *job.job.FileName
 		}
 	}
+	job.cancel() // 停止下载上下文
 	tt := job.torrent
-	job.mu.RUnlock()
+	job.torrent = nil
+	job.mu.Unlock()
+
 	if tt != nil {
 		info = tt.Info()
+		tt.Drop()
 	}
-	// 元信息尚未就绪时回退到下载目录的元信息缓存。
 	if info == nil {
 		info = readDownloadInfo(baseDir, infoHash)
-	}
-
-	res, cancelErr := job.Cancel()
-	if cancelErr != nil {
-		return cancelErr
-	}
-	// 已完成任务取消是幂等操作（结果仍为 Completed），不能删除已落盘的文件；
-	// 其余合法取消都会回到 Discovered，此时无论是否产生新版本都执行一次清理，
-	// 保证重复取消也能清掉残留的 part 文件。
-	if res.Task != models.TaskDiscovered {
-		return nil
 	}
 
 	m.mu.Lock()
 	delete(m.jobsMap, infoHash)
 	m.mu.Unlock()
 
+	// 1. 清磁盘下载痕迹
 	m.cleanDownload(baseDir, infoHash, info, fileName)
+	// 2. 清分片完成记录
+	var numPieces int
+	if info != nil {
+		numPieces = info.NumPieces()
+	}
+	m.clearPieceRecords(baseDir, infoHash, numPieces)
+	// 3. 删数据库记录（download_tasks + local_files，resources 保留）
+	if err := m.ResourceDao.DeleteTaskByHash(infoHash); err != nil {
+		logger.Torrent.Warn("删除下载任务记录失败", slog.String("info_hash", infoHash), slog.Any("err", err))
+	}
+
+	emitDownloadEvent(EventDownloadStateChanged, &vo.TorrentJobVO{InfoHash: infoHash})
 	go m.schedule()
 	return nil
 }
@@ -782,7 +788,7 @@ func (m *TorrentManager) cancelResourceByHash(infoHash string) error {
 	return m.cancelResource(resource)
 }
 
-// cancelResource 把资源记录恢复为「未下载」并清理磁盘下载痕迹。
+// cancelResource 把数据库记录（download_tasks + local_files）真实删除，清理磁盘下载痕迹。
 func (m *TorrentManager) cancelResource(resource *models.Resource) error {
 	if resource == nil || resource.Kind != models.KindTorrent {
 		return errors.New(ErrKeyTaskNotFound)
@@ -792,32 +798,20 @@ func (m *TorrentManager) cancelResource(resource *models.Resource) error {
 	if baseDir == "" {
 		baseDir = m.currentDownloadDir()
 	}
-	fileName := ""
+	var fileName string
 	if resource.FileName != nil {
 		fileName = *resource.FileName
 	}
 
-	fromVersion := resource.StateVersion
-	now := time.Now()
-	res, err := resource.ApplyEvent(models.EvCancel, models.EventPayload{
-		Now:             now,
-		SourceAvailable: sourceAvailable(resource),
-	})
-	if err != nil {
+	// 清磁盘下载痕迹
+	m.cleanDownload(baseDir, resource.InfoHash, readDownloadInfo(baseDir, resource.InfoHash), fileName)
+
+	// 删数据库记录（resources 保留不动）
+	if err := m.ResourceDao.DeleteTaskByHash(resource.InfoHash); err != nil {
 		return err
-	}
-	// 已完成 / 未下载状态重复取消为幂等操作：结果已不是 Discovered 说明资源仍处于
-	// 完成状态，不能清理磁盘数据；其余情况统一执行清理，重复取消也能清除残留。
-	if res.Task != models.TaskDiscovered {
-		return nil
 	}
 
-	resource.UpdateTime = &now
-	if err := m.persistState(resource, fromVersion); err != nil {
-		return err
-	}
-	m.cleanDownload(baseDir, resource.InfoHash, readDownloadInfo(baseDir, resource.InfoHash), fileName)
-	emitDownloadEvent(EventDownloadStateChanged, voFromResource(resource))
+	emitDownloadEvent(EventDownloadStateChanged, &vo.TorrentJobVO{InfoHash: resource.InfoHash})
 	return nil
 }
 
@@ -1249,8 +1243,41 @@ func (m *TorrentManager) runJob(job *TorrentJob) {
 		go m.schedule()
 	}()
 
-	if job.StartDownload() == outcomeStalled {
+	outcome := job.StartDownload()
+	switch outcome {
+	case outcomeStalled:
 		m.failOrRetry(job, ErrKeyStalled)
+	case outcomeDeadSeed:
+		// 死种观察窗口过了仍无进展：种子本身已失效，直接标记 failed，不走重试。
+		m.markDeadSeedFailed(job)
+	}
+}
+
+// markDeadSeedFailed 判定死种后直接标记任务为 failed，不再进入自动重试流程。
+// 底层 torrent 对象仍继续跑（DHT / tracker 持续发现），但业务层不再给它重试机会。
+func (m *TorrentManager) markDeadSeedFailed(job *TorrentJob) {
+	if job == nil {
+		return
+	}
+	state := job.currentState()
+	if state != models.TaskDownloading && state != models.TaskPreparing {
+		return
+	}
+
+	now := time.Now()
+	// 传 Attempt = maxAttempts，让状态机 GuardAttempt 判定直接走 TaskFailed，
+	// 而不是进入 TaskRetryWait 再等一轮自动重试。
+	res, err := job.Apply(models.EvStalled, models.EventPayload{
+		Now:       now,
+		Attempt:   job.maxAttempts(), // == maxAttempts → GuardAttempt 触发 → AltTo = TaskFailed
+		ErrorCode: ErrKeyDeadSeed,
+	})
+	if err != nil {
+		logger.Torrent.Warn("死种流转被拒绝", slog.String("info_hash", job.infoHash()), slog.Any("err", err))
+		return
+	}
+	if res.Task == models.TaskFailed {
+		logger.Torrent.Warn("判定为死种，任务标记失败", slog.String("info_hash", job.infoHash()))
 	}
 }
 

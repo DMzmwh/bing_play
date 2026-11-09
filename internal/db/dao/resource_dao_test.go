@@ -257,20 +257,29 @@ func TestListPlayable(t *testing.T) {
 
 	now := time.Now()
 	fileName := func(s string) *string { return &s }
+	int64Ptr := func(v int64) *int64 { return &v }
 	localPath := `D:\downloads`
 
-	mk := func(hash string, kind models.Kind, task models.TaskState, local models.LocalState, file *string) *models.Resource {
+	// 下载中的种子需要 downloaded_size / total_size >= 10% 才进播放列表
+	totalSize := int64(1000)
+	okDownloaded := int64(150)   // 15% >= 10%
+	lowDownloaded := int64(50)   // 5% < 10%
+	zeroDownloaded := int64(0)
+
+	mk := func(hash string, kind models.Kind, task models.TaskState, local models.LocalState, file *string, downloaded, total *int64) *models.Resource {
 		name := hash
 		return &models.Resource{
-			InfoHash:     hash,
-			ResourceName: &name,
-			FileName:     file,
-			LocalPath:    localPath,
-			Kind:         kind,
-			TaskState:    task,
-			LocalState:   local,
-			CreateTime:   &now,
-			UpdateTime:   &now,
+			InfoHash:       hash,
+			ResourceName:   &name,
+			FileName:       file,
+			LocalPath:      localPath,
+			Kind:           kind,
+			TaskState:      task,
+			LocalState:     local,
+			TotalSize:      total,
+			DownloadedSize: downloaded,
+			CreateTime:     &now,
+			UpdateTime:     &now,
 		}
 	}
 
@@ -279,21 +288,25 @@ func TestListPlayable(t *testing.T) {
 		want     bool
 	}{
 		// 本地视频：可用
-		{mk("", models.KindLocal, models.TaskCompleted, models.LocalPresent, fileName("local.mp4")), true},
-		// 下载中 / 校验中的视频：支持边下边播
-		{mk("hash-downloading", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("downloading.mkv")), true},
-		{mk("hash-verifying", models.KindTorrent, models.TaskVerifying, models.LocalPartial, fileName("verifying.mp4")), true},
+		{mk("", models.KindLocal, models.TaskCompleted, models.LocalPresent, fileName("local.mp4"), nil, nil), true},
+		// 下载中 / 校验中的视频：progress >= 10% 才进播放列表
+		{mk("hash-downloading", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("downloading.mkv"), int64Ptr(okDownloaded), int64Ptr(totalSize)), true},
+		{mk("hash-verifying", models.KindTorrent, models.TaskVerifying, models.LocalPartial, fileName("verifying.mp4"), int64Ptr(okDownloaded), int64Ptr(totalSize)), true},
 		// 已完成且本地齐备
-		{mk("hash-completed", models.KindTorrent, models.TaskCompleted, models.LocalPresent, fileName("completed.mp4")), true},
+		{mk("hash-completed", models.KindTorrent, models.TaskCompleted, models.LocalPresent, fileName("completed.mp4"), nil, nil), true},
 		// 已完成但文件丢失 / 损坏不可播放
-		{mk("hash-lost", models.KindTorrent, models.TaskCompleted, models.LocalMissing, fileName("lost.mp4")), false},
-		{mk("hash-corrupted", models.KindTorrent, models.TaskCompleted, models.LocalCorrupted, fileName("corrupted.mp4")), false},
+		{mk("hash-lost", models.KindTorrent, models.TaskCompleted, models.LocalMissing, fileName("lost.mp4"), nil, nil), false},
+		{mk("hash-corrupted", models.KindTorrent, models.TaskCompleted, models.LocalCorrupted, fileName("corrupted.mp4"), nil, nil), false},
 		// 暂停、排队中的任务没有活跃下载上下文
-		{mk("hash-paused", models.KindTorrent, models.TaskPaused, models.LocalPartial, fileName("paused.mp4")), false},
-		{mk("hash-queued", models.KindTorrent, models.TaskQueued, models.LocalNone, fileName("queued.mp4")), false},
+		{mk("hash-paused", models.KindTorrent, models.TaskPaused, models.LocalPartial, fileName("paused.mp4"), nil, nil), false},
+		{mk("hash-queued", models.KindTorrent, models.TaskQueued, models.LocalNone, fileName("queued.mp4"), nil, nil), false},
 		// 非视频种子不进入播放列表
-		{mk("hash-archive", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("archive.zip")), false},
-		{mk("hash-no-file", models.KindTorrent, models.TaskDownloading, models.LocalPartial, nil), false},
+		{mk("hash-archive", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("archive.zip"), int64Ptr(okDownloaded), int64Ptr(totalSize)), false},
+		{mk("hash-no-file", models.KindTorrent, models.TaskDownloading, models.LocalPartial, nil, int64Ptr(okDownloaded), int64Ptr(totalSize)), false},
+		// 下载进度不达 10% 门槛
+		{mk("hash-low-progress", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("low-progress.mp4"), int64Ptr(lowDownloaded), int64Ptr(totalSize)), false},
+		// metadata 刚拿到、downloaded_size 为 0
+		{mk("hash-zero-progress", models.KindTorrent, models.TaskDownloading, models.LocalPartial, fileName("zero-progress.mp4"), int64Ptr(zeroDownloaded), int64Ptr(totalSize)), false},
 	}
 
 	wantCount := 0

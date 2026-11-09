@@ -38,6 +38,8 @@ const (
 	ErrKeyNoSource        = "download.error.no_source"
 	ErrKeyMetadataTimeout = "download.error.metadata_timeout"
 	ErrKeyStalled         = "download.error.stalled"
+	// ErrKeyDeadSeed 种子长时间无进展且无任何完整 seeder，判定为死种已失效。
+	ErrKeyDeadSeed        = "download.error.dead_seed"
 	ErrKeyDownloadFailed  = "download.error.download_failed"
 	ErrKeyPermission      = "download.error.permission"
 	ErrKeyNoSpace         = "download.error.no_space"
@@ -66,7 +68,9 @@ const (
 //   - RetryDelay：自动重试前的等待时间，避免网络抖动时立即重连。
 //   - ProgressInterval：进度采样与事件推送间隔。
 //   - PersistInterval：下载进度落库间隔，降低 SQLite 写入频率。
-//   - StallTimeout：下载中长时间没有新增数据时判定为卡住并触发重试。
+//   - StallTimeout：下载中多长时间没有新增数据判定为"卡住"，进入死种观察窗口。
+//   - DeadSeedWindow：stall 后原地观察的最长时长；窗口内如果有新字节或新 seeder 出现则恢复，
+//     窗口过了仍然没活判定为死种，直接标记 failed 不走重试。
 type DownloadConfig struct {
 	MaxConcurrent    int           `json:"maxConcurrent"`
 	MaxRetries       int           `json:"maxRetries"`
@@ -75,6 +79,7 @@ type DownloadConfig struct {
 	ProgressInterval time.Duration `json:"progressInterval"`
 	PersistInterval  time.Duration `json:"persistInterval"`
 	StallTimeout     time.Duration `json:"stallTimeout"`
+	DeadSeedWindow   time.Duration `json:"deadSeedWindow"`
 }
 
 // DefaultDownloadConfig 返回默认下载参数。
@@ -82,11 +87,12 @@ func DefaultDownloadConfig() DownloadConfig {
 	return DownloadConfig{
 		MaxConcurrent:    5,
 		MaxRetries:       3,
-		MetadataTimeout:  10 * time.Minute,
+		MetadataTimeout:  5 * time.Hour,
 		RetryDelay:       30 * time.Second,
 		ProgressInterval: time.Second,
 		PersistInterval:  10 * time.Second,
-		StallTimeout:     3 * time.Minute,
+		StallTimeout:     5 * time.Minute,
+		DeadSeedWindow:   15 * time.Minute,
 	}
 }
 
@@ -128,6 +134,8 @@ const (
 	outcomeCancelled
 	// outcomeStalled 长时间无进展，需要自动重试。
 	outcomeStalled
+	// outcomeDeadSeed stall 后死种观察窗口过了仍无进展，种子已失效，直接标记 failed。
+	outcomeDeadSeed
 )
 
 // emitDownloadEvent 向所有窗口广播下载事件。
