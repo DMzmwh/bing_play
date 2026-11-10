@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/DMzmwh/bing-dhtcrawler/dht"
@@ -84,7 +85,7 @@ func asTorrentRecord(item any) (storage.TorrentRecord, bool) {
 func toResource(record storage.TorrentRecord) *models.Resource {
 	name := record.Name
 	size := record.Size
-	sourceURL := buildSourceURL(record.InfoHash, record.PeerAddr)
+	sourceURL := buildSourceURL(record.InfoHash, record.PeerAddrs)
 	discoveredAt := record.DiscoveredAt
 	if discoveredAt.IsZero() {
 		discoveredAt = time.Now()
@@ -101,13 +102,18 @@ func toResource(record storage.TorrentRecord) *models.Resource {
 }
 
 // buildSourceURL 生成磁力链接。
-// 抓取时提供元数据的节点已确认持有该种子，作为 x.pe 参数写入，
-// 下载端可直接连上它拉取元数据与分片，不必再等 DHT 重新发现 peer。
-func buildSourceURL(infoHash, peerAddr string) string {
-	magnet := "magnet:?xt=urn:btih:" + infoHash
-	if peerAddr == "" {
-		return magnet
+// 抓取时提供元数据的节点已确认持有该种子，全部作为 x.pe 参数写入，
+// 下载端可直接连上它们拉取元数据与分片，不必再等 DHT 重新发现 peer。
+func buildSourceURL(infoHash string, peerAddrs []string) string {
+	var sb strings.Builder
+	sb.WriteString("magnet:?xt=urn:btih:")
+	sb.WriteString(infoHash)
+	for _, addr := range peerAddrs {
+		if addr == "" {
+			continue
+		}
+		sb.WriteString("&x.pe=")
+		sb.WriteString(url.QueryEscape(addr))
 	}
-
-	return magnet + "&x.pe=" + url.QueryEscape(peerAddr)
+	return sb.String()
 }

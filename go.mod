@@ -3,7 +3,7 @@ module github.com/bing/bing-play
 go 1.26.0
 
 require (
-	github.com/DMzmwh/bing-dhtcrawler v0.2.1
+	github.com/DMzmwh/bing-dhtcrawler v0.2.2
 	github.com/anacrolix/dht/v2 v2.24.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/torrent v1.61.1-0.20261024051421-5f95cd33fd29
