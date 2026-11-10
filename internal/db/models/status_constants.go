@@ -738,6 +738,9 @@ func (r *Resource) ApplyEvent(e Event, p EventPayload) (Result, error) {
 			r.NextRetryAt = nil
 		}
 	case EvSourceUnresolved, EvDownloadFatal:
+		// 致命错误不进入重试流程，清空尝试次数，前端只展示错误信息。
+		r.Attempt = 0
+		r.NextRetryAt = nil
 		r.ErrorCode = p.ErrorCode
 	case EvVerifyOK:
 		r.ErrorCode = ""

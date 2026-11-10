@@ -1254,22 +1254,18 @@ func (m *TorrentManager) runJob(job *TorrentJob) {
 }
 
 // markDeadSeedFailed 判定死种后直接标记任务为 failed，不再进入自动重试流程。
-// 底层 torrent 对象仍继续跑（DHT / tracker 持续发现），但业务层不再给它重试机会。
+// 使用 EvDownloadFatal 直达 TaskFailed：不消耗重试次数，也不会在前端显示「已重试 N 次」。
 func (m *TorrentManager) markDeadSeedFailed(job *TorrentJob) {
 	if job == nil {
 		return
 	}
-	state := job.currentState()
-	if state != models.TaskDownloading && state != models.TaskPreparing {
+	if state := job.currentState(); state != models.TaskDownloading {
 		return
 	}
 
 	now := time.Now()
-	// 传 Attempt = maxAttempts，让状态机 GuardAttempt 判定直接走 TaskFailed，
-	// 而不是进入 TaskRetryWait 再等一轮自动重试。
-	res, err := job.Apply(models.EvStalled, models.EventPayload{
+	res, err := job.Apply(models.EvDownloadFatal, models.EventPayload{
 		Now:       now,
-		Attempt:   job.maxAttempts(), // == maxAttempts → GuardAttempt 触发 → AltTo = TaskFailed
 		ErrorCode: ErrKeyDeadSeed,
 	})
 	if err != nil {

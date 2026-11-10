@@ -605,6 +605,10 @@
     "description": "download error - stalled",
     "other": "Download stalled, retrying automatically"
   },
+  "download.error.dead_seed": {
+    "description": "download error - dead seed",
+    "other": "No download progress for a long time and no complete seeder available, the torrent is dead"
+  },
   "download.error.download_failed": {
     "description": "download error - generic failure",
     "other": "Download failed, please try again later"

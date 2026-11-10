@@ -605,6 +605,10 @@
     "description": "下載錯誤 - 下載停滯",
     "other": "下載長時間沒有進展，正在自動重試"
   },
+  "download.error.dead_seed": {
+    "description": "下載錯誤 - 死種",
+    "other": "長時間沒有下載進展，且沒有可用的完整種子，判定為死種"
+  },
   "download.error.download_failed": {
     "description": "下載錯誤 - 一般失敗",
     "other": "下載失敗，請稍後重試"
