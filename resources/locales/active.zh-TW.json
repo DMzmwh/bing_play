@@ -59,6 +59,14 @@
     "description": "電視直播 - 左側頻道清單標題",
     "other": "電視清單"
   },
+  "tv.switch_language": {
+    "description": "電視直播 - 切換語言按鈕提示",
+    "other": "切換語言"
+  },
+  "tv.bundled_hint": {
+    "description": "電視直播 - 使用內建備援頻道資料時的提示",
+    "other": "目前為內建頻道資料，訂閱源恢復後會自動更新"
+  },
   "tv.search_placeholder": {
     "description": "電視直播 - 搜尋頻道輸入框佔位",
     "other": "搜尋頻道"
@@ -512,6 +520,10 @@
   "download.speed_label": {
     "description": "下載中心 - 欄位：速度",
     "other": "速度"
+  },
+  "download.seeders_label": {
+    "description": "下載中心 - 欄位：種子數（已連線的完整種子數量）",
+    "other": "種子"
   },
   "download.eta_label": {
     "description": "下載中心 - 欄位：剩餘時間",

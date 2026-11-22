@@ -37,6 +37,12 @@ func main() {
 			filepath.Join(home, "Library", "Android", "sdk"),
 			"/usr/local/share/android-sdk",
 		}
+		// Android Studio 在 Windows 上默认装在 %LOCALAPPDATA%\Android\Sdk
+		if runtime.GOOS == "windows" {
+			if local := os.Getenv("LOCALAPPDATA"); local != "" {
+				possiblePaths = append([]string{filepath.Join(local, "Android", "Sdk")}, possiblePaths...)
+			}
+		}
 		for _, p := range possiblePaths {
 			if _, err := os.Stat(p); err == nil {
 				androidHome = p
@@ -63,14 +69,9 @@ func main() {
 		fmt.Println("✓ adb is installed")
 	}
 
-	// Check emulator
+	// Check emulator（可选：仅模拟器调试需要，真机/电视打包不需要）
 	if !checkCommand("emulator", "-list-avds") {
-		if androidHome != "" {
-			emulatorPath := filepath.Join(androidHome, "emulator")
-			errors = append(errors, fmt.Sprintf("emulator not found. Add %s to PATH", emulatorPath))
-		} else {
-			errors = append(errors, "emulator not found. Install Android Emulator via SDK Manager")
-		}
+		fmt.Println("⚠ Android Emulator 未安装（可选，仅模拟器调试需要）")
 	} else {
 		fmt.Println("✓ Android Emulator is installed")
 	}
@@ -96,11 +97,11 @@ func main() {
 		fmt.Printf("✓ Android NDK: %s\n", ndkHome)
 	}
 
-	// Check Java
-	if !checkCommand("java", "-version") {
-		errors = append(errors, "Java not found. Install JDK 11+ (OpenJDK recommended)")
+	// Check Java（PATH 中没有时回退到 ANDROID_JAVA_HOME / JAVA_HOME）
+	if !javaAvailable() {
+		errors = append(errors, "Java not found. Install JDK 17+ (21 recommended)")
 	} else {
-		fmt.Println("✓ Java is installed")
+		fmt.Println("✓ Java is installed (project requires JDK 17+, 21 recommended)")
 	}
 
 	// Check for AVD (Android Virtual Device)
@@ -152,6 +153,27 @@ func checkCommand(name string, args ...string) bool {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
+}
+
+// javaAvailable 先查 PATH，再回退到 ANDROID_JAVA_HOME / JAVA_HOME。
+func javaAvailable() bool {
+	if checkCommand("java", "-version") {
+		return true
+	}
+	for _, key := range []string{"ANDROID_JAVA_HOME", "JAVA_HOME"} {
+		home := os.Getenv(key)
+		if home == "" {
+			continue
+		}
+		java := filepath.Join(home, "bin", "java")
+		if runtime.GOOS == "windows" {
+			java += ".exe"
+		}
+		if checkCommand(java, "-version") {
+			return true
+		}
+	}
+	return false
 }
 
 // offerCreateAVD mirrors the iOS installer's simulator offer: when no AVD

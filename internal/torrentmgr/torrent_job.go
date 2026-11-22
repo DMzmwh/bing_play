@@ -323,7 +323,7 @@ func (job *TorrentJob) monitorProgress() (stalled bool, dead bool) {
 	job.push(job.ToVO())
 
 	// 默认不输出进度明细；排查下载问题时把 1 != 1
-	if 1 != 1 {
+	if 1 == 1 {
 		stallInfo := "正常"
 		if stalled {
 			if !stallStartAt.IsZero() {
@@ -742,6 +742,7 @@ func (job *TorrentJob) voLocked(now time.Time) *vo.TorrentJobVO {
 		}
 		payload.Downloaded = job.torrent.BytesCompleted()
 		payload.Peers = job.torrent.Stats().ActivePeers
+		payload.Seeders = job.torrent.Stats().ConnectedSeeders
 	}
 
 	if payload.TotalSize > 0 {

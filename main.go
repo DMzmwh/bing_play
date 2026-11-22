@@ -24,6 +24,7 @@ var assets embed.FS
 //
 //go:embed resources/locales/*.json
 //go:embed resources/migrations/*.sql
+//go:embed resources/tv/bundled.m3u
 var resourceAssets embed.FS
 
 //go:embed build/appicon.png

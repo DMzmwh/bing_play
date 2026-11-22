@@ -106,7 +106,7 @@ func TestSaveCrawledResourcesDedup(t *testing.T) {
 	if err := d.SaveCrawledResources(list); err != nil {
 		t.Fatalf("首次写入失败: %v", err)
 	}
-	// 同一批 InfoHash 再写一次，唯一索引冲突应被忽略而不是报错。
+	// 同一批 InfoHash 再写一次，应命中 upsert 而不是新增行。
 	if err := d.SaveCrawledResources(list); err != nil {
 		t.Fatalf("重复写入失败: %v", err)
 	}
@@ -117,6 +117,59 @@ func TestSaveCrawledResourcesDedup(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("resources 行数 = %d, want 2", count)
+	}
+}
+
+// TestSaveCrawledResourcesOverwriteSourceURL 重复抓取时只覆盖磁力链接与 update_time。
+func TestSaveCrawledResourcesOverwriteSourceURL(t *testing.T) {
+	d := newTestResourceDAO(t)
+
+	firstName, firstURL := "首次名称", "magnet:?xt=urn:btih:hash-1&x.pe=1.1.1.1%3A1"
+	firstSize := int64(100)
+	firstTime := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+	if err := d.SaveCrawledResources([]*models.Resource{{
+		InfoHash:     "hash-1",
+		ResourceName: &firstName,
+		SourceURL:    &firstURL,
+		TotalSize:    &firstSize,
+		CreateTime:   &firstTime,
+		UpdateTime:   &firstTime,
+	}}); err != nil {
+		t.Fatalf("首次写入失败: %v", err)
+	}
+
+	secondName, secondURL := "再次名称", "magnet:?xt=urn:btih:hash-1&x.pe=2.2.2.2%3A2"
+	secondSize := int64(200)
+	secondTime := firstTime.Add(time.Hour)
+	if err := d.SaveCrawledResources([]*models.Resource{{
+		InfoHash:     "hash-1",
+		ResourceName: &secondName,
+		SourceURL:    &secondURL,
+		TotalSize:    &secondSize,
+		CreateTime:   &secondTime,
+		UpdateTime:   &secondTime,
+	}}); err != nil {
+		t.Fatalf("重复写入失败: %v", err)
+	}
+
+	var got models.ResourceRecord
+	if err := d.db.Where("info_hash = ?", "hash-1").First(&got).Error; err != nil {
+		t.Fatalf("查询失败: %v", err)
+	}
+	if got.SourceURL == nil || *got.SourceURL != secondURL {
+		t.Fatalf("source_url = %v, want %q（应覆盖为最新链接）", got.SourceURL, secondURL)
+	}
+	if got.UpdateTime == nil || !got.UpdateTime.Equal(secondTime) {
+		t.Fatalf("update_time = %v, want %v", got.UpdateTime, secondTime)
+	}
+	if got.ResourceName == nil || *got.ResourceName != firstName {
+		t.Fatalf("resource_name = %v, want %q（不应被覆盖）", got.ResourceName, firstName)
+	}
+	if got.TotalSize == nil || *got.TotalSize != firstSize {
+		t.Fatalf("total_size = %v, want %d（不应被覆盖）", got.TotalSize, firstSize)
+	}
+	if got.CreateTime == nil || !got.CreateTime.Equal(firstTime) {
+		t.Fatalf("create_time = %v, want %v（不应被覆盖）", got.CreateTime, firstTime)
 	}
 }
 
@@ -262,8 +315,8 @@ func TestListPlayable(t *testing.T) {
 
 	// 下载中的种子需要 downloaded_size / total_size >= 10% 才进播放列表
 	totalSize := int64(1000)
-	okDownloaded := int64(150)   // 15% >= 10%
-	lowDownloaded := int64(50)   // 5% < 10%
+	okDownloaded := int64(150) // 15% >= 10%
+	lowDownloaded := int64(50) // 5% < 10%
 	zeroDownloaded := int64(0)
 
 	mk := func(hash string, kind models.Kind, task models.TaskState, local models.LocalState, file *string, downloaded, total *int64) *models.Resource {

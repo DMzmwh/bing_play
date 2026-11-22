@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "auto-imports.d.ts",
+    "components.d.ts",
+    "src/**/*.d.ts",
+    "src/views/Tv.vue"
+  ],
+  "exclude": ["node_modules"]
+}

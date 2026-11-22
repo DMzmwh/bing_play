@@ -1,5 +1,11 @@
 <template>
-    <div class="app">
+    <div class="app" :class="{ 'tv-mode': isTv }">
+        <template v-if="isTv">
+            <div class="tv-body">
+                <router-view />
+            </div>
+        </template>
+        <template v-else>
         <div class="top-bar">
             <!-- 品牌主图标：B / 兵 字形，尺寸 26px，与 50px 导航栏垂直居中 -->
             <BrandIcon class="nav-logo" variant="nav" :size="26" />
@@ -57,6 +63,7 @@
                 </keep-alive>
             </router-view>
         </div>
+        </template>
     </div>
 </template>
 
@@ -66,6 +73,10 @@ import { useRoute, useRouter } from "vue-router";
 import { Window } from "@wailsio/runtime";
 import { i18nState, setLang, t } from "@/i18n";
 import BrandIcon from "@/components/BrandIcon.vue";
+
+// IS_TV 由 vite define 注入；这里转成 setup 局部变量供模板使用
+// （Vue 模板有自己的全局白名单，不能直接引用自定义全局常量）。
+const isTv = IS_TV;
 
 const router = useRouter();
 const route = useRoute();
@@ -205,6 +216,15 @@ const refresh = () => window.location.reload();
 }
 
 .body {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+}
+
+/* Android TV 模式：去掉顶栏/窗口按钮，内容区全屏铺满 */
+.tv-mode .tv-body {
     width: 100%;
     flex: 1;
     min-height: 0;

@@ -4,27 +4,30 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  APP_ID: '{{.APP_ID | default "com.wails.start"}}'
+  # 与 build/android/app/build.gradle 的 applicationId 保持一致
+  APP_ID: '{{.APP_ID | default "com.wails.app"}}'
+  MAIN_ACTIVITY: '{{.MAIN_ACTIVITY | default "com.wails.app.MainActivity"}}'
   MIN_SDK: '21'
   TARGET_SDK: '35'
-  # The emulator runs the host architecture; physical devices are arm64
+  # The emulator runs the host architecture; physical devices are arm64.
+  # Windows 上没有 uname，默认按真机/电视的 arm64 处理（模拟器请显式传 ARCH=amd64）。
   HOST_ARCH:
-    sh: '[ "$(uname -m)" = "x86_64" ] && echo "amd64" || echo "arm64"'
+    sh: '{{if eq OS "windows"}}echo "arm64"{{else}}[ "$(uname -m)" = "x86_64" ] && echo "amd64" || echo "arm64"{{end}}'
   # System-image ABI for the host, used in the "create an AVD" hint below.
   ANDROID_ABI:
-    sh: '[ "$(uname -m)" = "arm64" ] && echo "arm64-v8a" || echo "x86_64"'
+    sh: '{{if eq OS "windows"}}echo "x86_64"{{else}}[ "$(uname -m)" = "arm64" ] && echo "arm64-v8a" || echo "x86_64"{{end}}'
   # SDK location: $ANDROID_HOME / $ANDROID_SDK_ROOT, else the per-OS default
   # (macOS: ~/Library/Android/sdk, Linux/other: ~/Android/Sdk)
   SDK_ROOT:
     sh: 'echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}"'
   ADB:
-    sh: 'command -v adb || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}/platform-tools/adb"'
+    sh: '{{if eq OS "windows"}}echo "adb"{{else}}command -v adb || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}/platform-tools/adb"{{end}}'
   EMULATOR:
     sh: 'command -v emulator || echo "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}/emulator/emulator"'
   # avdmanager lives under cmdline-tools/<version>/bin; used to auto-create an
   # AVD when none exists (mirrors the iOS `ensure-simulator` auto-create flow).
   AVDMANAGER:
-    sh: 'command -v avdmanager || ls "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}"/cmdline-tools/*/bin/avdmanager 2>/dev/null | sort -V | tail -1 || true'
+    sh: '{{if eq OS "windows"}}echo ""{{else}}command -v avdmanager || ls "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$([ -d "$HOME/Library/Android/sdk" ] && echo "$HOME/Library/Android/sdk" || echo "$HOME/Android/Sdk")}}"/cmdline-tools/*/bin/avdmanager 2>/dev/null | sort -V | tail -1 || true{{end}}'
 
 tasks:
   install:deps:
@@ -46,6 +49,8 @@ tasks:
             ref: .BUILD_FLAGS
           PRODUCTION:
             ref: .PRODUCTION
+          # TV 构建走 build:tv（只对 Tv.vue 做类型检查，跳过桌面专用页面）
+          IS_TV: "true"
     cmds:
       - echo "Building Android start {{.APP_NAME}}..."
       - task: compile:go:shared
@@ -55,62 +60,15 @@ tasks:
       BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production,android -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-tags android,debug -buildvcs=false -gcflags=all="-l"{{end}}'
     env:
       PRODUCTION: '{{.PRODUCTION | default "false"}}'
+      # 前端构建时注入 TV 模式开关：vite.config.ts 的 define 据此把 IS_TV 置为 true，
+      # 让前端只打包并渲染 TV 直播页面。仅影响 Android 构建，桌面端不受影响。
+      VITE_IS_TV: "true"
 
   compile:go:shared:
-    summary: Compile Go code to shared library (.so)
+    summary: Compile Go code to shared library (.so) with the Android NDK
+    # 真实实现见 build/android/scripts/build（跨平台，Windows 可直接运行）
     cmds:
-      - |
-        # Locate the NDK: $ANDROID_NDK_HOME, or the newest installed NDK
-        NDK_ROOT="$ANDROID_NDK_HOME"
-        if [ -z "$NDK_ROOT" ]; then
-          SDK_ROOT="{{.SDK_ROOT}}"
-          NDK_ROOT=$(ls -d "$SDK_ROOT"/ndk/* 2>/dev/null | sort -V | tail -1)
-        fi
-        if [ -z "$NDK_ROOT" ] || [ ! -d "$NDK_ROOT" ]; then
-          echo "Error: Android NDK not found"
-          echo "Install one with: sdkmanager 'ndk;26.3.11579264' (or set ANDROID_NDK_HOME)"
-          exit 1
-        fi
-
-        # Determine toolchain based on host OS
-        case "$(uname -s)" in
-          Darwin) HOST_TAG="darwin-x86_64" ;;
-          Linux)  HOST_TAG="linux-x86_64" ;;
-          *)      echo "Unsupported host OS"; exit 1 ;;
-        esac
-
-        TOOLCHAIN="$NDK_ROOT/toolchains/llvm/prebuilt/$HOST_TAG"
-
-        # Set compiler based on architecture
-        case "{{.ARCH}}" in
-          arm64)
-            export CC="$TOOLCHAIN/bin/aarch64-linux-android{{.MIN_SDK}}-clang"
-            export CXX="$TOOLCHAIN/bin/aarch64-linux-android{{.MIN_SDK}}-clang++"
-            export GOARCH=arm64
-            JNI_DIR="arm64-v8a"
-            ;;
-          amd64|x86_64)
-            export CC="$TOOLCHAIN/bin/x86_64-linux-android{{.MIN_SDK}}-clang"
-            export CXX="$TOOLCHAIN/bin/x86_64-linux-android{{.MIN_SDK}}-clang++"
-            export GOARCH=amd64
-            JNI_DIR="x86_64"
-            ;;
-          *)
-            echo "Unsupported architecture: {{.ARCH}}"
-            exit 1
-            ;;
-        esac
-
-        export CGO_ENABLED=1
-        export GOOS=android
-
-        mkdir -p {{.BIN_DIR}}
-        mkdir -p build/android/app/src/main/jniLibs/$JNI_DIR
-
-        go build -buildmode=c-shared -overlay build/android/overlay.json {{.BUILD_FLAGS}} \
-          -o build/android/app/src/main/jniLibs/$JNI_DIR/libwails.so
-    vars:
-      BUILD_FLAGS: '{{if eq .PRODUCTION "true"}}-tags production,android -trimpath -buildvcs=false -ldflags="-w -s"{{else}}-tags android,debug -buildvcs=false -gcflags=all="-l"{{end}}'
+      - go run ./build/android/scripts/build -mode shared -arch {{.ARCH | default "arm64"}} -min-sdk {{.MIN_SDK}} -production={{.PRODUCTION | default "false"}}
 
   compile:go:all-archs:
     summary: Compile Go code for all Android architectures (fat APK)
@@ -180,52 +138,31 @@ tasks:
     summary: Assembles a debug APK using Gradle
     preconditions:
       - sh: 'command -v java >/dev/null || [ -n "$JAVA_HOME" ]'
-        msg: "Java not found. Install a JDK (e.g. brew install openjdk@21) and/or set JAVA_HOME"
+        msg: "Java not found. Install JDK 17+ (21 recommended) and set ANDROID_JAVA_HOME (or JAVA_HOME)"
     cmds:
-      - |
-        cd build/android
-        # The exec bit is lost when gradlew is extracted from the embedded
-        # build assets, so restore it before invoking the wrapper.
-        chmod +x ./gradlew
-        ./gradlew assembleDebug
-        cp app/build/outputs/apk/debug/app-debug.apk "../../{{.BIN_DIR}}/{{.APP_NAME}}.apk"
-        echo "APK created: {{.BIN_DIR}}/{{.APP_NAME}}.apk"
+      - go run ./build/android/scripts/build -mode apk -production=false -name {{.APP_NAME}} -bin-dir {{.BIN_DIR}}
 
   assemble:apk:release:
     summary: Assembles a release APK using Gradle (signed with the debug keystore unless ANDROID_KEYSTORE_FILE is set)
     preconditions:
       - sh: 'command -v java >/dev/null || [ -n "$JAVA_HOME" ]'
-        msg: "Java not found. Install a JDK (e.g. brew install openjdk@21) and/or set JAVA_HOME"
+        msg: "Java not found. Install JDK 17+ (21 recommended) and set ANDROID_JAVA_HOME (or JAVA_HOME)"
     cmds:
-      - |
-        cd build/android
-        # The exec bit is lost when gradlew is extracted from the embedded
-        # build assets, so restore it before invoking the wrapper.
-        chmod +x ./gradlew
-        ./gradlew assembleRelease
-        cp app/build/outputs/apk/release/app-release.apk "../../{{.BIN_DIR}}/{{.APP_NAME}}.apk"
-        echo "Release APK created: {{.BIN_DIR}}/{{.APP_NAME}}.apk"
+      - go run ./build/android/scripts/build -mode apk -production=true -name {{.APP_NAME}} -bin-dir {{.BIN_DIR}}
 
   assemble:aab:
     summary: Assembles a debug AAB (Android App Bundle) using Gradle
     preconditions:
       - sh: 'command -v java >/dev/null || [ -n "$JAVA_HOME" ]'
-        msg: "Java not found. Install a JDK (e.g. brew install openjdk@21) and/or set JAVA_HOME"
+        msg: "Java not found. Install JDK 17+ (21 recommended) and set ANDROID_JAVA_HOME (or JAVA_HOME)"
     cmds:
-      - |
-        cd build/android
-        # The exec bit is lost when gradlew is extracted from the embedded
-        # build assets, so restore it before invoking the wrapper.
-        chmod +x ./gradlew
-        ./gradlew bundleDebug
-        cp app/build/outputs/bundle/debug/app-debug.aab "../../{{.BIN_DIR}}/{{.APP_NAME}}.aab"
-        echo "AAB created: {{.BIN_DIR}}/{{.APP_NAME}}.aab"
+      - go run ./build/android/scripts/build -mode aab -production=false -name {{.APP_NAME}} -bin-dir {{.BIN_DIR}}
 
   assemble:aab:release:
     summary: Assembles a release AAB for Play Store upload (signed with the debug keystore unless ANDROID_KEYSTORE_FILE is set)
     preconditions:
       - sh: 'command -v java >/dev/null || [ -n "$JAVA_HOME" ]'
-        msg: "Java not found. Install a JDK (e.g. brew install openjdk@21) and/or set JAVA_HOME"
+        msg: "Java not found. Install JDK 17+ (21 recommended) and set ANDROID_JAVA_HOME (or JAVA_HOME)"
     cmds:
       - |
         # With Play App Signing, the keystore configured here is your UPLOAD
@@ -237,13 +174,7 @@ tasks:
           echo "bundles. Set ANDROID_KEYSTORE_FILE, ANDROID_KEYSTORE_PASSWORD,"
           echo "ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD before uploading."
         fi
-        cd build/android
-        # The exec bit is lost when gradlew is extracted from the embedded
-        # build assets, so restore it before invoking the wrapper.
-        chmod +x ./gradlew
-        ./gradlew bundleRelease
-        cp app/build/outputs/bundle/release/app-release.aab "../../{{.BIN_DIR}}/{{.APP_NAME}}.aab"
-        echo "Release AAB created: {{.BIN_DIR}}/{{.APP_NAME}}.aab"
+      - go run ./build/android/scripts/build -mode aab -production=true -name {{.APP_NAME}} -bin-dir {{.BIN_DIR}}
 
   generate:android:overlay:
     internal: true
@@ -337,10 +268,8 @@ tasks:
         echo "Emulator boot timeout"
         exit 1
     preconditions:
-      - sh: '[ -x "{{.ADB}}" ] || command -v adb'
-        msg: "adb not found. Install the Android SDK platform-tools (or set ANDROID_HOME)"
-      - sh: '[ -x "{{.EMULATOR}}" ] || command -v emulator'
-        msg: "emulator not found. Install the Android SDK emulator package (or set ANDROID_HOME)"
+      - sh: '{{if eq OS "windows"}}false{{else}}[ -x "{{.ADB}}" ] || command -v adb{{end}}'
+        msg: "Windows 上不支持自动启动模拟器，请连接真机/电视后使用 android:run:device 或 android:deploy:device"
 
   deploy-emulator:
     summary: Deploy the packaged release APK to the Android Emulator
@@ -350,9 +279,9 @@ tasks:
           ARCH: '{{.ARCH | default .HOST_ARCH}}'
     cmds:
       - task: ensure-emulator
-      - '"{{.ADB}}" uninstall {{.APP_ID}} 2>/dev/null || true'
-      - '"{{.ADB}}" install "{{.BIN_DIR}}/{{.APP_NAME}}.apk"'
-      - '"{{.ADB}}" shell am start -n {{.APP_ID}}/com.wails.start.MainActivity'
+      - '"{{.ADB}}" uninstall {{.APP_ID}} || true'
+      - '"{{.ADB}}" install -r "{{.BIN_DIR}}/{{.APP_NAME}}.apk"'
+      - '"{{.ADB}}" shell am start -n {{.MAIN_ACTIVITY}}'
 
   run:
     summary: Build, install and launch a debug build in the Android Emulator
@@ -361,9 +290,9 @@ tasks:
       - task: build
     cmds:
       - task: assemble:apk
-      - '"{{.ADB}}" uninstall {{.APP_ID}} 2>/dev/null || true'
-      - '"{{.ADB}}" install "{{.BIN_DIR}}/{{.APP_NAME}}.apk"'
-      - '"{{.ADB}}" shell am start -n {{.APP_ID}}/com.wails.start.MainActivity'
+      - '"{{.ADB}}" uninstall {{.APP_ID}} || true'
+      - '"{{.ADB}}" install -r "{{.BIN_DIR}}/{{.APP_NAME}}.apk"'
+      - '"{{.ADB}}" shell am start -n {{.MAIN_ACTIVITY}}'
 
   device:list:
     summary: Lists connected Android devices and emulators (serials)
@@ -384,7 +313,13 @@ tasks:
           DEVICE="${DEVICE_ID:-}"
         fi
         if [ -z "$DEVICE" ]; then
+          {{if eq OS "windows"}}
+          echo "Windows 上请显式指定设备序列号：wails3 task android:run:device DEVICE_ID=<serial>"
+          "{{.ADB}}" devices -l
+          exit 1
+          {{else}}
           DEVICE=$("{{.ADB}}" devices | awk 'NR > 1 && $2 == "device" && $1 !~ /^emulator-/ { print $1; exit }')
+          {{end}}
         fi
         if [ -z "$DEVICE" ]; then
           echo "Error: no connected physical Android device found."
@@ -394,9 +329,9 @@ tasks:
         fi
 
         echo "Deploying {{.BIN_DIR}}/{{.APP_NAME}}.apk to device $DEVICE..."
-        "{{.ADB}}" -s "$DEVICE" uninstall {{.APP_ID}} 2>/dev/null || true
-        "{{.ADB}}" -s "$DEVICE" install "{{.BIN_DIR}}/{{.APP_NAME}}.apk"
-        "{{.ADB}}" -s "$DEVICE" shell am start -n {{.APP_ID}}/com.wails.app.MainActivity
+        "{{.ADB}}" -s "$DEVICE" uninstall {{.APP_ID}} || true
+        "{{.ADB}}" -s "$DEVICE" install -r "{{.BIN_DIR}}/{{.APP_NAME}}.apk"
+        "{{.ADB}}" -s "$DEVICE" shell am start -n {{.MAIN_ACTIVITY}}
     preconditions:
       - sh: '[ -x "{{.ADB}}" ] || command -v adb'
         msg: "adb not found. Install the Android SDK platform-tools (or set ANDROID_HOME)"
@@ -414,7 +349,13 @@ tasks:
           DEVICE="${DEVICE_ID:-}"
         fi
         if [ -z "$DEVICE" ]; then
+          {{if eq OS "windows"}}
+          echo "Windows 上请显式指定设备序列号：wails3 task android:deploy:device DEVICE_ID=<serial>"
+          "{{.ADB}}" devices -l
+          exit 1
+          {{else}}
           DEVICE=$("{{.ADB}}" devices | awk 'NR > 1 && $2 == "device" && $1 !~ /^emulator-/ { print $1; exit }')
+          {{end}}
         fi
         if [ -z "$DEVICE" ]; then
           echo "Error: no connected physical Android device found."
@@ -424,9 +365,9 @@ tasks:
         fi
 
         echo "Deploying {{.BIN_DIR}}/{{.APP_NAME}}.apk to device $DEVICE..."
-        "{{.ADB}}" -s "$DEVICE" uninstall {{.APP_ID}} 2>/dev/null || true
-        "{{.ADB}}" -s "$DEVICE" install "{{.BIN_DIR}}/{{.APP_NAME}}.apk"
-        "{{.ADB}}" -s "$DEVICE" shell am start -n {{.APP_ID}}/com.wails.app.MainActivity
+        "{{.ADB}}" -s "$DEVICE" uninstall {{.APP_ID}} || true
+        "{{.ADB}}" -s "$DEVICE" install -r "{{.BIN_DIR}}/{{.APP_NAME}}.apk"
+        "{{.ADB}}" -s "$DEVICE" shell am start -n {{.MAIN_ACTIVITY}}
     preconditions:
       - sh: '[ -x "{{.ADB}}" ] || command -v adb'
         msg: "adb not found. Install the Android SDK platform-tools (or set ANDROID_HOME)"
@@ -448,7 +389,7 @@ tasks:
   logs:
     summary: Stream Android logcat filtered to this start
     cmds:
-      - '"{{.ADB}}" logcat -v time | grep -E "(Wails|{{.APP_NAME}})" || true'
+      - '{{if eq OS "windows"}}"{{.ADB}}" logcat -v time{{else}}"{{.ADB}}" logcat -v time | grep -E "(Wails|{{.APP_NAME}})" || true{{end}}'
 
   logs:all:
     summary: Stream all Android logcat (verbose)
@@ -458,7 +399,4 @@ tasks:
   clean:
     summary: Clean build artifacts
     cmds:
-      - rm -rf {{.BIN_DIR}}
-      - rm -rf build/android/start/build
-      - rm -rf build/android/start/src/main/jniLibs/*/libwails.so
-      - rm -rf build/android/.gradle
+      - go run ./build/android/scripts/build -mode clean -bin-dir {{.BIN_DIR}}

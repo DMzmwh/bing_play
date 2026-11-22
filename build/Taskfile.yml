@@ -100,7 +100,7 @@ tasks:
     cmds:
       - task: frontend:run
         vars:
-          SCRIPT: '{{if eq .DEV "true"}}build:dev{{else}}build{{end}}'
+          SCRIPT: '{{if eq .DEV "true"}}build:dev{{else if eq .IS_TV "true"}}build:tv{{else}}build{{end}}'
     env:
       PRODUCTION: '{{if eq .DEV "true"}}false{{else}}true{{end}}'
 

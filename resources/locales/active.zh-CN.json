@@ -59,6 +59,14 @@
     "description": "电视直播 - 左侧频道列表标题",
     "other": "电视列表"
   },
+  "tv.switch_language": {
+    "description": "电视直播 - 切换语言按钮提示",
+    "other": "切换语言"
+  },
+  "tv.bundled_hint": {
+    "description": "电视直播 - 使用内置兜底频道数据时的提示",
+    "other": "当前为内置频道数据，订阅源恢复后会自动更新"
+  },
   "tv.search_placeholder": {
     "description": "电视直播 - 搜索频道输入框占位",
     "other": "搜索频道"
@@ -512,6 +520,10 @@
   "download.speed_label": {
     "description": "下载中心 - 列：速度",
     "other": "速度"
+  },
+  "download.seeders_label": {
+    "description": "下载中心 - 列：种子数（已连接的完整种子数量）",
+    "other": "种子"
   },
   "download.eta_label": {
     "description": "下载中心 - 列：剩余时间",

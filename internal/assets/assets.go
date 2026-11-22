@@ -16,6 +16,9 @@ const LocalesDir = "resources/locales"
 // MigrationsDir 内置数据库迁移目录。
 const MigrationsDir = "resources/migrations"
 
+// TVBundledFile 内置频道兜底数据（订阅源不可达时使用）。
+const TVBundledFile = "resources/tv/bundled.m3u"
+
 func (f FS) Open(name string) (fs.File, error) {
 	return embed.FS(f).Open(name)
 }

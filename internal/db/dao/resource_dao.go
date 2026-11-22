@@ -482,7 +482,8 @@ func (d *ResourceDAO) ListPlayable() ([]models.Resource, error) {
 }
 
 // SaveCrawledResources 批量写入爬虫抓取到的种子资源，仅写 resources 表。
-// 依靠 info_hash 主键做去重：已存在的记录直接跳过。
+// 以 info_hash 主键去重：已存在的记录用本次抓到的磁力链接覆盖 source_url 并刷新 update_time，
+// 其余字段（名称、大小、create_time 等）保持首次入库的值。
 func (d *ResourceDAO) SaveCrawledResources(list []*models.Resource) error {
 	if len(list) == 0 {
 		return nil
@@ -501,7 +502,10 @@ func (d *ResourceDAO) SaveCrawledResources(list []*models.Resource) error {
 	}
 
 	return d.db.
-		Clauses(clause.OnConflict{DoNothing: true}).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "info_hash"}},
+			DoUpdates: clause.AssignmentColumns([]string{"source_url", "update_time"}),
+		}).
 		CreateInBatches(rows, 100).
 		Error
 }

@@ -1,11 +1,21 @@
 <template>
-    <div class="tv">
+    <div class="tv" :class="{ 'tv-mode': isTv, collapsed: isTv && sidebarCollapsed }">
         <!-- 左侧频道列表 -->
-        <div class="left-panel" :style="{ width: `${sidebarWidth}px` }">
+        <div class="left-panel" :style="{ width: isTv ? '340px' : `${sidebarWidth}px` }">
             <div class="panel-header">
                 <div class="title">
                     <BrandIcon class="playlist-logo" variant="mark" :size="18" />
                     <span class="title-text">{{ t('tv.title') }} [{{ filteredChannels.length }}]</span>
+                    <n-button
+                        v-if="i18nState.locales.length > 1"
+                        class="lang-switch"
+                        size="tiny"
+                        quaternary
+                        :title="t('tv.switch_language')"
+                        @click="cycleLang"
+                    >
+                        {{ currentLangLabel }}
+                    </n-button>
                 </div>
                 <n-input
                     v-model:value="keyword"
@@ -17,6 +27,9 @@
                 <div v-if="statusText" class="status" :class="{ error: Boolean(syncError) }">
                     {{ statusText }}
                 </div>
+                <div v-if="usingBundled" class="status">
+                    {{ t('tv.bundled_hint') }}
+                </div>
             </div>
 
             <div class="list">
@@ -24,6 +37,7 @@
                     <div
                         class="group-title"
                         :class="{ 'has-active': isPlayingGroup(group.title) }"
+                        :tabindex="isTv ? 0 : -1"
                         @click="toggleGroup(group.title)"
                     >
                         <n-icon
@@ -37,7 +51,7 @@
                     <!-- 折叠时不渲染子节点；大分组用虚拟列表，避免一次创建上千个 DOM -->
                     <template v-if="isGroupExpanded(group.title)">
                         <n-virtual-list
-                            v-if="group.channels.length > virtualThreshold"
+                            v-if="!isTv && group.channels.length > virtualThreshold"
                             class="group-virtual"
                             :items="group.channels"
                             :item-size="channelItemHeight"
@@ -48,6 +62,8 @@
                                 <div
                                     class="channel"
                                     :class="{ active: item.id === currentChannel?.id }"
+                                    :tabindex="isTv ? 0 : -1"
+                                    :data-channel-id="item.id"
                                     @click="playChannel(item)"
                                 >
                                     <span class="channel-logo">
@@ -69,6 +85,8 @@
                                 :key="channel.id"
                                 class="channel"
                                 :class="{ active: channel.id === currentChannel?.id }"
+                                :tabindex="isTv ? 0 : -1"
+                                :data-channel-id="channel.id"
                                 @click="playChannel(channel)"
                             >
                                 <span class="channel-logo">
@@ -89,7 +107,7 @@
         </div>
 
         <!-- 拖动调整频道列表宽度，松开后保存 -->
-        <div class="resize-handle" @mousedown="onResizeStart" />
+        <div v-if="!isTv" class="resize-handle" @mousedown="onResizeStart" />
 
         <!-- 中间播放区 -->
         <div class="center">
@@ -131,10 +149,11 @@ import { Events } from '@wailsio/runtime'
 import { CaretDown, CaretForward } from '@vicons/ionicons5'
 import Hls from 'hls.js'
 import type Artplayer from 'artplayer'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { Option } from 'artplayer'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import BrandIcon from '@/components/BrandIcon.vue'
-import { i18nState, t } from '@/i18n'
+import { i18nState, setLang as applyLang, t } from '@/i18n'
 import {
     SettingKeys,
     activeAccentColor,
@@ -177,6 +196,36 @@ const errorMsg = ref('')
 const expandedGroup = ref<string | null>(null)
 
 const message = useMessage()
+
+/** 是否为 Android TV 构建：开启遥控器焦点导航与全屏切换 */
+const isTv = IS_TV
+/** TV 端侧栏是否收起（收起后播放区全屏，上下键直接换台） */
+const sidebarCollapsed = ref(false)
+
+/** 是否正在展示随包内置的频道数据（订阅源全部不可达时的兜底）。 */
+const usingBundled = computed(() =>
+    sources.value.some((source) => source.bundled && source.channelCount > 0)
+)
+
+/** 当前语言显示名：优先使用本地名称（如 简体中文 / English） */
+const currentLangLabel = computed(() => {
+    const current = i18nState.locales.find((locale) => locale.code === i18nState.lang)
+    return current?.nativeName || current?.name || i18nState.lang.toUpperCase()
+})
+
+/** 遥控器操作下拉框不方便，语言按钮改为循环切换 */
+async function cycleLang() {
+    const locales = i18nState.locales
+    if (locales.length < 2) return
+    const index = locales.findIndex((locale) => locale.code === i18nState.lang)
+    const next = locales[(index + 1) % locales.length]
+    try {
+        await applyLang(next.code)
+    } catch (error) {
+        console.warn('切换语言失败:', error)
+        message.error(t('settings.error.language'))
+    }
+}
 
 /** 分组结构：组名为 group-title，缺失时归入「未分组」 */
 interface ChannelGroup {
@@ -395,6 +444,7 @@ const playerOptions = computed(() => {
         fullscreenWeb: true,
         theme: activeAccentColor.value,
         lang,
+        // Previous/Next 是 ArtPlayer.vue 自定义按钮使用的文案，不在 ArtPlayer 原生 I18nValue 类型里
         i18n: {
             [lang]: {
                 ...i18nState.playerMessages,
@@ -402,9 +452,11 @@ const playerOptions = computed(() => {
                 Previous: t('tv.prev_channel'),
                 Next: t('tv.next_channel')
             }
-        },
+        } as unknown as Option['i18n'],
         type: 'm3u8',
         isLive: true,
+        // TV 端禁用 ArtPlayer 默认快捷键（方向键/空格），改由本组件统一处理遥控器按键
+        hotkey: !isTv,
         customType: {
             m3u8(video: HTMLVideoElement, url: string, art: Artplayer) {
                 const player = art as PlayerWithHls
@@ -580,6 +632,134 @@ function onResizeEnd() {
     )
 }
 
+/* =========================
+ * Android TV 遥控器焦点导航
+ * ========================= */
+
+/** 判断当前焦点是否在可编辑元素上（输入框聚焦时方向键交给输入框移动光标） */
+function isEditable(el: Element | null): boolean {
+    if (!el) return false
+    const tag = (el.tagName || '').toLowerCase()
+    return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable
+}
+
+/** TV 端可聚焦元素：搜索框 → 分组标题 → 频道行，按 DOM 顺序排列 */
+function getTvFocusables(): HTMLElement[] {
+    return Array.from(
+        document.querySelectorAll<HTMLElement>(
+            '.panel-header input, .list .group-title, .list .channel'
+        )
+    )
+}
+
+/** 聚焦当前播放频道，没有则聚焦第一个频道（兜底到第一项） */
+function focusCurrentOrFirst() {
+    const list = getTvFocusables()
+    if (!list.length) return
+    let idx = -1
+    const cur = currentChannel.value
+    if (cur) idx = list.findIndex((el) => el.dataset.channelId === String(cur.id))
+    if (idx === -1) {
+        const firstChannel = list.find((el) => el.classList.contains('channel'))
+        idx = firstChannel ? list.indexOf(firstChannel) : 0
+    }
+    const target = list[idx]
+    if (target) {
+        target.focus()
+        target.scrollIntoView({ block: 'nearest' })
+    }
+}
+
+/** TV 遥控器按键：上下导航/换台，确认播放，左右全屏切换 */
+function onTvKeydown(e: KeyboardEvent) {
+    const active = document.activeElement as HTMLElement | null
+    // 输入框聚焦时，方向键交给输入框本身
+    if (isEditable(active) && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        return
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (sidebarCollapsed.value) {
+            // 全屏模式：上下键直接换台
+            e.preventDefault()
+            if (e.key === 'ArrowUp') playPrevChannel()
+            else playNextChannel()
+            return
+        }
+        const list = getTvFocusables()
+        if (!list.length) return
+        e.preventDefault()
+        let idx = active ? list.indexOf(active) : -1
+        if (idx === -1) {
+            const cur = currentChannel.value
+            if (cur) idx = list.findIndex((el) => el.dataset.channelId === String(cur.id))
+            if (idx === -1) {
+                const firstChannel = list.find((el) => el.classList.contains('channel'))
+                idx = firstChannel ? list.indexOf(firstChannel) : 0
+            }
+        } else {
+            idx =
+                e.key === 'ArrowDown'
+                    ? Math.min(idx + 1, list.length - 1)
+                    : Math.max(idx - 1, 0)
+        }
+        const target = list[idx]
+        if (target) {
+            target.focus()
+            target.scrollIntoView({ block: 'nearest' })
+        }
+        return
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (sidebarCollapsed.value) {
+            // 全屏下左右键回到列表
+            e.preventDefault()
+            sidebarCollapsed.value = false
+            void nextTick(focusCurrentOrFirst)
+            return
+        }
+        // 列表模式下左右键收起侧栏，进入全屏播放
+        e.preventDefault()
+        sidebarCollapsed.value = true
+        return
+    }
+    if (e.key === 'Enter') {
+        e.preventDefault()
+        if (isEditable(active)) {
+            // 搜索框回车：聚焦第一个匹配频道
+            void nextTick(focusCurrentOrFirst)
+            return
+        }
+        // 触发当前焦点元素的点击（播放频道 / 展开分组）
+        active?.click()
+        return
+    }
+}
+
+// 频道首次加载完成后，TV 端自动展开第一个分组并聚焦
+watch(
+    () => channels.value.length,
+    (len) => {
+        if (!isTv || len === 0) return
+        if (!expandedGroup.value && groups.value.length) {
+            expandedGroup.value = groups.value[0].title
+        }
+        void nextTick(focusCurrentOrFirst)
+    },
+    { once: true }
+)
+
+// 切换播放频道时，TV 端自动展开其分组并滚动到可视区
+watch(currentChannel, (ch) => {
+    if (!isTv || !ch) return
+    expandedGroup.value = ch.groupTitle || t('tv.group_unknown')
+    void nextTick(() => {
+        const el = document.querySelector<HTMLElement>(
+            `.list .channel[data-channel-id="${ch.id}"]`
+        )
+        el?.scrollIntoView({ block: 'nearest' })
+    })
+})
+
 let offChannelsUpdated: (() => void) | undefined
 
 onMounted(async () => {
@@ -592,12 +772,20 @@ onMounted(async () => {
     offChannelsUpdated = Events.On(TV_CHANNELS_UPDATED_EVENT, () => {
         void fetchSnapshot()
     })
+
+    // Android TV：监听遥控器按键
+    if (isTv) {
+        window.addEventListener('keydown', onTvKeydown)
+    }
 })
 
 onBeforeUnmount(() => {
     offChannelsUpdated?.()
     window.removeEventListener('mousemove', onResizeMove)
     window.removeEventListener('mouseup', onResizeEnd)
+    if (isTv) {
+        window.removeEventListener('keydown', onTvKeydown)
+    }
 })
 </script>
 
@@ -636,6 +824,15 @@ onBeforeUnmount(() => {
 .title-text {
     flex: 1;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lang-switch {
+    flex: none;
+    max-width: 96px;
+    font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -838,5 +1035,44 @@ onBeforeUnmount(() => {
     pointer-events: none;
     z-index: 10;
     color: var(--app-text);
+}
+
+/* =========================
+ * Android TV 模式
+ * ========================= */
+/* 电视端列表固定更宽、行距更大，保证远距离可读 */
+.tv-mode .left-panel {
+    padding: 12px;
+}
+
+.tv-mode .group-title {
+    font-size: 14px;
+    margin-top: 14px;
+}
+
+.tv-mode .channel {
+    height: 44px;
+    font-size: 15px;
+    padding: 0 10px;
+    gap: 10px;
+}
+
+.tv-mode .channel .name {
+    font-size: 15px;
+}
+
+/* 遥控器焦点高亮：聚焦行用强调色描边 + 底色，10 英尺外清晰可见 */
+.tv-mode .channel:focus,
+.tv-mode .group-title:focus {
+    outline: 3px solid var(--app-accent, #3b82f6);
+    outline-offset: -3px;
+    border-radius: 6px;
+    background: var(--app-hover-row);
+}
+
+/* 侧栏收起后播放区全屏，隐藏分隔条 */
+.tv.collapsed .left-panel,
+.tv.collapsed .resize-handle {
+    display: none;
 }
 </style>

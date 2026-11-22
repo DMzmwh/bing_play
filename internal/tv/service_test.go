@@ -68,7 +68,17 @@ CREATE UNIQUE INDEX idx_tv_channels_key ON tv_channels(channel_key);
 	}
 
 	tvDAO := dao.NewTvDAO(db)
-	return &Service{dao: tvDAO}, tvDAO, db
+	return &Service{dao: tvDAO, resFS: stubResourceFS{}}, tvDAO, db
+}
+
+// stubResourceFS 用于替换打包嵌入的内置资源，默认返回空数据。
+type stubResourceFS struct {
+	data []byte
+	err  error
+}
+
+func (f stubResourceFS) ReadFile(string) ([]byte, error) {
+	return append([]byte(nil), f.data...), f.err
 }
 
 // TestNextSyncDelay 校验下一次请求时间基于各源上次同步时间计算。
@@ -448,5 +458,59 @@ func TestSyncAllFetchesWhenNoChannels(t *testing.T) {
 	}
 	if got.LastSyncAt == nil || !got.LastSyncAt.After(syncedAt) {
 		t.Fatalf("同步时间 = %v, want 晚于 %v", got.LastSyncAt, syncedAt)
+	}
+}
+
+// TestApplyBundledFallback 校验订阅源全部失败时导入内置频道，真实数据恢复后自动清理。
+func TestApplyBundledFallback(t *testing.T) {
+	s, tvDAO, db := newTestService(t)
+	s.resFS = stubResourceFS{data: []byte(
+		"#EXTM3U\n#EXTINF:-1 tvg-name=\"CCTV1\" group-title=\"央视\",CCTV-1\nhttp://example.com/cctv1.m3u8\n",
+	)}
+
+	source := models.TVSource{Name: "默认源", URL: "https://example.com/a.m3u", Enabled: true}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("写入订阅源失败: %v", err)
+	}
+	if err := db.Model(&source).Update("last_error", "tv.error.internal").Error; err != nil {
+		t.Fatalf("写入同步错误失败: %v", err)
+	}
+
+	s.applyBundledFallback()
+
+	channels, err := tvDAO.ListChannels()
+	if err != nil {
+		t.Fatalf("读取频道失败: %v", err)
+	}
+	if len(channels) != 1 || channels[0].Name != "CCTV-1" {
+		t.Fatalf("兜底频道 = %+v, want 1 个内置频道", channels)
+	}
+
+	// 真实订阅源恢复并写入频道后，内置频道应被清理。
+	if err := tvDAO.ReplaceChannels(source.ID, []models.TVChannel{{
+		SourceID:   source.ID,
+		ChannelKey: "real-1",
+		Name:       "真实频道",
+		StreamURL:  "http://example.com/real.m3u8",
+	}}); err != nil {
+		t.Fatalf("写入真实频道失败: %v", err)
+	}
+
+	s.applyBundledFallback()
+
+	channels, err = tvDAO.ListChannels()
+	if err != nil {
+		t.Fatalf("读取频道失败: %v", err)
+	}
+	if len(channels) != 1 || channels[0].SourceID != source.ID {
+		t.Fatalf("清理后频道 = %+v, want 只保留真实频道", channels)
+	}
+
+	sources, err := tvDAO.ListSources()
+	if err != nil {
+		t.Fatalf("读取订阅源失败: %v", err)
+	}
+	if len(sources) != 1 || sources[0].URL != source.URL {
+		t.Fatalf("订阅源 = %+v, want 只保留真实订阅源", sources)
 	}
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android TV 桌面横幅（banner）：320x180 比例。
+    这里用 layer-list 取应用图标居中铺在深色底上，避免依赖额外 PNG 资源；
+    如需更精美的品牌横幅，替换为 res/drawable-xhdpi/tv_banner.png（320x180）即可。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/banner_bg" />
+    <item
+        android:width="120dp"
+        android:height="120dp"
+        android:gravity="center"
+        android:drawable="@mipmap/ic_launcher" />
+</layer-list>

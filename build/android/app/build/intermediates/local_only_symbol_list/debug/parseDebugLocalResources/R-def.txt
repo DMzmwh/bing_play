@@ -1,0 +1,17 @@
+R_DEF: Internal format may change without notice
+local
+color banner_bg
+color black
+color wails_background
+color wails_blue
+color wails_blue_dark
+color white
+drawable tv_banner
+id main_container
+id webview
+layout activity_main
+mipmap ic_launcher
+mipmap ic_launcher_round
+string app_name
+style Theme.WailsApp
+xml file_paths

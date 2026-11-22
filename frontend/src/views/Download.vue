@@ -171,6 +171,7 @@ function isSameJob(left: TorrentJobVO, right: TorrentJobVO): boolean {
         left.downloadSpeed === right.downloadSpeed &&
         left.uploadSpeed === right.uploadSpeed &&
         left.peers === right.peers &&
+        left.seeders === right.seeders &&
         left.etaSeconds === right.etaSeconds &&
         left.priority === right.priority &&
         left.attempt === right.attempt &&
@@ -491,6 +492,12 @@ const activeColumns = computed<DataTableColumns<TorrentJobVO>>(() => [
         title: t('download.speed_label'),
         width: 110,
         render: (row) => formatSpeed(row.downloadSpeed)
+    },
+    {
+        key: 'seeders',
+        title: t('download.seeders_label'),
+        width: 80,
+        render: (row) => (row.seeders ?? 0).toString()
     },
     {
         key: 'eta',

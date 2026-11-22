@@ -32,6 +32,8 @@ type TorrentJobVO struct {
 	UploadSpeed int64 `json:"uploadSpeed"`
 	// Peers 当前活跃 Peer 数量。
 	Peers int `json:"peers"`
+	// Seeders 当前已连接的完整种子数量（ConnectedSeeders）。
+	Seeders int `json:"seeders"`
 	// EtaSeconds 预计剩余时间（秒），-1 表示无法估算。
 	EtaSeconds int64 `json:"etaSeconds"`
 	// Priority 下载优先级，数值越大越先下载。

@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"errors"
 	"time"
 
 	"github.com/bing/bing-play/internal/db/models"
@@ -78,6 +79,42 @@ func (d *TvDAO) CountChannelsBySource() (map[int64]int64, error) {
 		result[row.SourceID] = row.Count
 	}
 	return result, nil
+}
+
+// CreateSourceIfAbsent 按 URL 查询订阅源，不存在时创建。
+func (d *TvDAO) CreateSourceIfAbsent(name, url string, enabled bool) (*models.TVSource, error) {
+	var source models.TVSource
+	err := d.db.Where("url = ?", url).First(&source).Error
+	switch {
+	case err == nil:
+		return &source, nil
+	case !errors.Is(err, gorm.ErrRecordNotFound):
+		return nil, err
+	}
+
+	source = models.TVSource{
+		Name:    name,
+		URL:     url,
+		Enabled: enabled,
+	}
+	if err := d.db.Create(&source).Error; err != nil {
+		return nil, err
+	}
+	return &source, nil
+}
+
+// DeleteSource 删除订阅源及其全部频道。
+func (d *TvDAO) DeleteSource(sourceID int64) error {
+	if sourceID == 0 {
+		return nil
+	}
+
+	return d.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("source_id = ?", sourceID).Delete(&models.TVChannel{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", sourceID).Delete(&models.TVSource{}).Error
+	})
 }
 
 // UpdateSourceSync 写回订阅源同步状态。

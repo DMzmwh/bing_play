@@ -3,6 +3,7 @@ package tv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bing/bing-play/internal/assets"
 	"github.com/bing/bing-play/internal/db/dao"
 	"github.com/bing/bing-play/internal/db/models"
 	"github.com/bing/bing-play/internal/logger"
@@ -32,6 +34,19 @@ const (
 	// maxRefreshRetries 已成功同步过的订阅源在定时刷新失败后的最大重试次数。
 	maxRefreshRetries = 5
 )
+
+// 内置频道兜底源：随安装包携带一份频道数据，订阅源全部不可达时使用。
+const (
+	// bundledSourceURL 内置兜底源的虚拟地址，不参与网络同步。
+	bundledSourceURL = "builtin://bundled-channels"
+	// bundledSourceName 内置兜底源名称。
+	bundledSourceName = "内置频道"
+)
+
+// ResourceFS 提供内置资源读取能力（resources/tv/bundled.m3u）。
+type ResourceFS interface {
+	ReadFile(name string) ([]byte, error)
+}
 
 // 同步失败时写入 tv_sources.last_error 的错误码，前端按 i18n key 展示。
 const (
@@ -60,6 +75,7 @@ type SourceStatus struct {
 	Name         string `json:"name"`
 	URL          string `json:"url"`
 	Enabled      bool   `json:"enabled"`
+	Bundled      bool   `json:"bundled"`
 	LastSyncAt   string `json:"lastSyncAt"`
 	LastError    string `json:"lastError"`
 	ChannelCount int64  `json:"channelCount"`
@@ -78,6 +94,7 @@ type Snapshot struct {
 type Service struct {
 	dao    *dao.TvDAO
 	client *http.Client
+	resFS  ResourceFS
 
 	// syncMu 串行化同步任务，避免启动同步与定时任务并发写库。
 	syncMu sync.Mutex
@@ -119,10 +136,11 @@ func newSourceHTTPClient() *http.Client {
 }
 
 // NewService 创建电视直播服务并注册到 Fx 生命周期。
-func NewService(lc fx.Lifecycle, tvDAO *dao.TvDAO) *Service {
+func NewService(lc fx.Lifecycle, tvDAO *dao.TvDAO, resFS assets.FS) *Service {
 	s := &Service{
 		dao:          tvDAO,
 		client:       newSourceHTTPClient(),
+		resFS:        resFS,
 		syncFailures: make(map[int64]int),
 	}
 
@@ -270,6 +288,7 @@ func (s *Service) rebuildSnapshotLocked() error {
 			Name:         sources[i].Name,
 			URL:          sources[i].URL,
 			Enabled:      sources[i].Enabled,
+			Bundled:      sources[i].URL == bundledSourceURL,
 			LastError:    sources[i].LastError,
 			ChannelCount: counts[sources[i].ID],
 		}
@@ -316,7 +335,125 @@ func (s *Service) SyncAll(ctx context.Context) ([]SourceStatus, error) {
 		s.syncSource(ctx, &sources[i])
 	}
 
+	// 全部订阅源不可达且本地没有任何频道时，导入随包内置的频道数据。
+	s.applyBundledFallback()
+
 	return s.Status()
+}
+
+// applyBundledFallback 在订阅源全部不可达且本地没有任何频道时，导入随包内置的频道数据，
+// 保证 TV 首次启动时列表不为空；真实频道同步成功后会自动移除内置频道，避免重复展示。
+func (s *Service) applyBundledFallback() {
+	sources, err := s.dao.ListSources()
+	if err != nil {
+		logError("内置频道兜底检查失败", slog.Any("err", err))
+		return
+	}
+
+	counts, err := s.dao.CountChannelsBySource()
+	if err != nil {
+		logError("内置频道兜底检查失败", slog.Any("err", err))
+		return
+	}
+
+	var bundledID int64
+	var realChannels int64
+	for i := range sources {
+		if sources[i].URL == bundledSourceURL {
+			bundledID = sources[i].ID
+			continue
+		}
+		realChannels += counts[sources[i].ID]
+	}
+
+	// 已有真实频道：清理之前导入的内置频道，避免重复展示。
+	if realChannels > 0 {
+		if bundledID != 0 {
+			if err := s.dao.DeleteSource(bundledID); err != nil {
+				logError("内置频道清理失败", slog.Any("err", err))
+				return
+			}
+			s.refreshSnapshot()
+		}
+		return
+	}
+
+	// 内置频道已导入且仍无真实数据：保留现状，等待后续同步。
+	if bundledID != 0 && counts[bundledID] > 0 {
+		return
+	}
+
+	// 仍有订阅源从未失败（同步中或已成功但暂无频道），交给后续同步处理。
+	for i := range sources {
+		if sources[i].URL == bundledSourceURL {
+			continue
+		}
+		if sources[i].Enabled && sources[i].LastError == "" {
+			return
+		}
+	}
+
+	source, err := s.dao.CreateSourceIfAbsent(bundledSourceName, bundledSourceURL, false)
+	if err != nil {
+		logError("内置频道源创建失败", slog.Any("err", err))
+		return
+	}
+
+	// 导入失败时把原因写回内置源，便于日志与界面定位。
+	recordError := func(stage string, cause error) {
+		logError("内置频道导入失败", slog.String("stage", stage), slog.Any("err", cause))
+		_ = s.dao.UpdateSourceSync(source.ID, nil, "bundled "+stage+": "+cause.Error(), "", "")
+	}
+
+	data, err := s.resFS.ReadFile(assets.TVBundledFile)
+	if err != nil {
+		recordError("read", err)
+		return
+	}
+	parsed, err := ParseM3U(bytes.NewReader(data))
+	if err != nil {
+		recordError("parse", err)
+		return
+	}
+	if len(parsed) == 0 {
+		recordError("parse", errors.New("no channels parsed"))
+		return
+	}
+
+	now := time.Now()
+	merged := make([]models.TVChannel, 0, len(parsed))
+	index := make(map[string]int, len(parsed))
+	for i := range parsed {
+		item := models.TVChannel{
+			SourceID:   source.ID,
+			ChannelKey: parsed[i].Key,
+			TvgID:      parsed[i].TvgID,
+			TvgName:    parsed[i].TvgName,
+			Name:       parsed[i].Name,
+			Logo:       parsed[i].Logo,
+			GroupTitle: parsed[i].GroupTitle,
+			StreamURL:  parsed[i].StreamURL,
+			Duration:   parsed[i].Duration,
+			SortOrder:  parsed[i].SortOrder,
+			CreateTime: &now,
+			UpdateTime: &now,
+		}
+		if pos, ok := index[item.ChannelKey]; ok {
+			merged[pos] = item
+			continue
+		}
+		index[item.ChannelKey] = len(merged)
+		merged = append(merged, item)
+	}
+
+	if err := s.dao.ReplaceChannels(source.ID, merged); err != nil {
+		recordError("write", err)
+		return
+	}
+
+	_ = s.dao.UpdateSourceSync(source.ID, &now, "", "", "")
+	s.refreshSnapshot()
+	emitChannelsUpdated(source.ID, len(merged))
 }
 
 // isSyncDue 判断订阅源距上次同步是否已达更新间隔。

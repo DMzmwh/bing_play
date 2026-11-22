@@ -7,6 +7,7 @@
     "dev": "vite",
     "build:dev": "vue-tsc && vite build --minify false --mode development",
     "build": "vue-tsc && vite build --mode production",
+    "build:tv": "vue-tsc -p tsconfig.tv.json && vite build --mode tv",
     "preview": "vite preview"
   },
   "dependencies": {

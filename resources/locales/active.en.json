@@ -59,6 +59,14 @@
     "description": "live TV - channel list title",
     "other": "Channels"
   },
+  "tv.switch_language": {
+    "description": "live TV - language switch button title",
+    "other": "Switch language"
+  },
+  "tv.bundled_hint": {
+    "description": "live TV - hint shown when channels come from the bundled fallback data",
+    "other": "Showing built-in channels; they will update automatically once the source is reachable."
+  },
   "tv.search_placeholder": {
     "description": "live TV - search input placeholder",
     "other": "Search channels"
@@ -512,6 +520,10 @@
   "download.speed_label": {
     "description": "download center - column: speed",
     "other": "Speed"
+  },
+  "download.seeders_label": {
+    "description": "download center - column: connected seeders",
+    "other": "Seeders"
   },
   "download.eta_label": {
     "description": "download center - column: ETA",
